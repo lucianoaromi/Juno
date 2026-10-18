@@ -144,11 +144,11 @@ Describe 'Persistencia aislada, recuperacion y compatibilidad' {
         $d.PowerScheme|Should BeNullOrEmpty
         Test-Path -LiteralPath $global:JunoStoreFixture.Root|Should Be $false
     }
-    It 'leer un formato antiguo no modifica ni migra sus bytes' {
+    It 'rechazar un General antiguo sin identidad no modifica ni migra sus bytes' {
         $path=Get-JunoStorePath General User
         Set-StoreRaw $path '{"PowerScheme":null,"CreatedPowerScheme":null,"VisualEffects":null}'
         $hash=Get-JunoHash (Read-JunoBytes $path)
-        [void](Read-JunoStore General User $null)
+        {Read-JunoStore General User $null}|Should Throw
         (Get-JunoHash (Read-JunoBytes $path))|Should Be $hash
         @(Get-JunoRecoveryCandidates $path).Count|Should Be 0
     }

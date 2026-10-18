@@ -76,8 +76,8 @@ Describe 'JUNO v0.9: shell visual independiente' {
         @($preview.OwnedForms).Count|Should Be 0
     }
 
-    It 'mantiene todas las operaciones de herramientas inactivas' {
-        $counts=@{'Rendimiento'=3;'Aplicaciones'=3;'Mantenimiento'=2;'Restauración'=3}
+    It 'mantiene las herramientas no integradas inactivas' {
+        $counts=@{'Rendimiento'=2;'Aplicaciones'=3;'Mantenimiento'=2;'Restauración'=3}
         foreach($section in $counts.Keys){
             $preview.Navigate($section)
             $actions=@(Get-PreviewControls $preview|Where-Object{$_.Name -eq 'ToolAction'})

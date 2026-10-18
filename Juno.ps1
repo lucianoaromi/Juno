@@ -14,6 +14,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
 
 . (Join-Path $PSScriptRoot 'BackupStore.ps1')
 . (Join-Path $PSScriptRoot 'RecoveryOperations.ps1')
+. (Join-Path $PSScriptRoot 'TransparencyOperations.ps1')
 . (Join-Path $PSScriptRoot 'BackgroundInventory.ps1')
 . (Join-Path $PSScriptRoot 'UiSupport.ps1')
 try { Enter-JunoLease }
@@ -25,31 +26,7 @@ try {
 if ($script:JunoLease.Abandoned) {
     [void][System.Windows.Forms.MessageBox]::Show('La instancia anterior termino sin liberar el bloqueo. JUNO validara los respaldos antes de cualquier cambio; revisa las operaciones pendientes.', 'JUNO - sesion interrumpida', 'OK', 'Warning')
 }
-$nativeCode = @'
-using System;
-using System.Runtime.InteropServices;
-public static class WinVisualEffects {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct ANIMATIONINFO {
-        public uint cbSize;
-        public int iMinAnimate;
-    }
-    [DllImport("user32.dll", EntryPoint="SystemParametersInfoW", SetLastError=true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SystemParametersInfoBool(uint action, uint param, out int value, uint update);
-    // Los SPI_SET...BOOL reciben el valor BOOL en pvParam, NO un puntero.
-    [DllImport("user32.dll", EntryPoint="SystemParametersInfoW", SetLastError=true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SystemParametersInfoSetBool(uint action, uint param, IntPtr value, uint update);
-    [DllImport("user32.dll", EntryPoint="SystemParametersInfoW", SetLastError=true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SystemParametersInfoAnimation(uint action, uint param, ref ANIMATIONINFO value, uint update);
-    // Avisar a las ventanas sobre un cambio visual sin reiniciar Explorer.
-    [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true)]
-    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, string lParam, uint flags, uint timeoutMs, out IntPtr result);
-}
-'@
-Add-Type -TypeDefinition $nativeCode
+Initialize-JunoVisualInterop
 
 $script:AppFolder = Join-Path $env:LOCALAPPDATA 'WinRendimiento'
 $script:BackupPath = Join-Path $script:AppFolder 'backup.json'
@@ -73,15 +50,6 @@ $script:EffectCodes = [ordered]@{
     DropShadow           = @(0x1024, 0x1025)
 }
 
-function Get-Backup {
-    $backup=Read-JunoStore 'General' 'User' ([pscustomobject]@{PowerScheme=$null;CreatedPowerScheme=$null;VisualEffects=$null;VisualRegistry=$null;TransparencyBackup=$null})
-    foreach ($name in @('VisualRegistry','TransparencyBackup')) {
-        if ($backup.PSObject.Properties.Name -notcontains $name) { Add-Member -InputObject $backup NoteProperty $name $null }
-    }
-    if ($backup.PSObject.Properties.Name -notcontains 'Journal') { Add-Member -InputObject $backup NoteProperty Journal ([pscustomobject]@{Version=1;Visual=$null;Transparency=$null}) }
-    return $backup
-}
-function Save-Backup($backup) { Write-JunoStore 'General' $backup 'User' }
 function Get-GuidFromText([string]$text) {
     $match = [regex]::Match($text, $script:GuidPattern)
     if ($match.Success) { return $match.Value.ToLowerInvariant() }
@@ -181,23 +149,7 @@ function Get-VisualRegistrySnapshot {
     }
     return ,$snapshot
 }
-function Set-RegistryVisual([string]$subkey, [string]$name, $value, [string]$kind) {
-    Assert-JunoLease
-    $match=@(Get-JunoVisualTargets | Where-Object { $_[0] -ceq $subkey -and $_[1] -ceq $name -and $_[2] -ceq $kind })
-    if ($match.Count -ne 1) { throw 'Destino visual no permitido.' }
-    Assert-JunoVisualSnapshot ([pscustomobject]@{Exists=$true;Kind=$kind;Value=[string]$value}) -Transparency:($name -eq 'EnableTransparency')
-    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($subkey)
-    if ($null -eq $key) { throw "No se pudo abrir registro HKCU\$subkey" }
-    try {
-        switch ($kind) {
-            'DWord' { $key.SetValue($name, [int]$value, [Microsoft.Win32.RegistryValueKind]::DWord) }
-            'QWord' { $key.SetValue($name, [long]$value, [Microsoft.Win32.RegistryValueKind]::QWord) }
-            'Binary' { $key.SetValue($name, [Convert]::FromBase64String([string]$value), [Microsoft.Win32.RegistryValueKind]::Binary) }
-            'ExpandString' { $key.SetValue($name, [string]$value, [Microsoft.Win32.RegistryValueKind]::ExpandString) }
-            default { $key.SetValue($name, [string]$value, [Microsoft.Win32.RegistryValueKind]::String) }
-        }
-    } finally { $key.Close() }
-}
+
 function Restore-VisualRegistry($snapshots) {
     Assert-JunoLease
     Assert-JunoVisualRegistry $snapshots
@@ -214,37 +166,7 @@ function Restore-VisualRegistry($snapshots) {
 function Apply-VisualEffects([bool]$keepFont) { Invoke-JunoVisual $false $keepFont }
 function Restore-VisualEffects { Invoke-JunoVisual $true }
 
-# Transparencia no forma parte del cuadro clasico "Opciones de rendimiento".
-# Clave documentada por Microsoft (HKCU, sin permisos de administrador).
-function Get-TransparencySnapshot {
-    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:TransparencyKey, $false)
-    try {
-        if ($null -eq $key -or -not ($key.GetValueNames() -contains 'EnableTransparency')) {
-            return [pscustomobject]@{ Exists = $false; Kind = $null; Value = $null }
-        }
-        $kind = $key.GetValueKind('EnableTransparency').ToString()
-        $raw = $key.GetValue('EnableTransparency', $null)
-        return [pscustomobject]@{ Exists = $true; Kind = $kind; Value = [string]$raw }
-    } finally { if ($null -ne $key) { $key.Close() } }
-}
-function Get-TransparencyState {
-    $snapshot = Get-TransparencySnapshot
-    if (-not $snapshot.Exists) { return $null }
-    return ([int]$snapshot.Value -ne 0)
-}
-function Notify-TransparencyChange {
-    # Algunas superficies se actualizan al recibir WM_SETTINGCHANGE;
-    # otras pueden necesitar cerrar y volver a iniciar sesion.
-    try {
-        $response = [IntPtr]::Zero
-        $sent = [WinVisualEffects]::SendMessageTimeout(
-            [IntPtr]0xFFFF, [uint32]0x001A, [IntPtr]::Zero,
-            'ImmersiveColorSet', [uint32]0x0002, [uint32]1500, [ref]$response)
-        return ($sent -ne [IntPtr]::Zero)
-    } catch { return $false }
-}
-function Set-Transparency([bool]$enabled) { Invoke-JunoTransparency $false $enabled }
-function Restore-Transparency { Invoke-JunoTransparency $true }
+# Transparencia y acceso al respaldo compartidos en TransparencyOperations.ps1.
 
 # Modulo separado: no modifica las funciones anteriores.
 . (Join-Path $PSScriptRoot 'Inicio.ps1')

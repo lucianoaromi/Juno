@@ -18,6 +18,31 @@ function Test-JunoAdmin {
         return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     } finally { $identity.Dispose() }
 }
+function Stop-JunoBackupValidation([string]$code,[string]$message) {
+    $failure=[IO.InvalidDataException]::new($message)
+    $failure.Data['JunoBackupCode']=$code
+    throw $failure
+}
+function Get-JunoBackupFailureCode([Exception]$failure) {
+    # RuntimeException/MethodInvocationException pueden envolver el error original.
+    for($depth=0;$null -ne $failure -and $depth -lt 32;$depth++) {
+        if($failure.Data.Contains('JunoBackupCode')) { return [string]$failure.Data['JunoBackupCode'] }
+        $failure=$failure.InnerException
+    }
+    return $null
+}
+function Get-JunoBackupFailureText([string]$code) {
+    # Mensajes seguros para la vista: nunca interpolar SID, MachineGuid, JSON o rutas.
+    switch -CaseSensitive ($code) {
+        'UserMismatch' { return 'La identidad del respaldo no coincide con la de esta ejecución. Comprueba la cuenta y el entorno aislado. No se cambia el SID ni se omite la validación.' }
+        'MachineMismatch' { return 'El respaldo corresponde a otro equipo. No se permite usarlo para modificar o restaurar este equipo.' }
+        'ScopeMismatch' { return 'El ámbito del respaldo no coincide con la operación de usuario o equipo. No se permite trasladarlo entre ámbitos.' }
+        'KindMismatch' { return 'El respaldo corresponde a otro módulo. No se utilizará en esta operación.' }
+        'FormatMismatch' { return 'El formato de respaldo no es compatible. Se conserva el archivo.' }
+        'UnverifiableLegacy' { return 'El respaldo histórico general no permite verificar usuario y equipo. Los cambios y la restauración quedan bloqueados; requiere recuperación supervisada.' }
+        default { return 'No se pudo validar o leer el respaldo. Se conserva el archivo; requiere revisión antes de modificar o restaurar.' }
+    }
+}
 function Enter-JunoLease([string]$name = 'Global\JUNO.0.8.State') {
     if (Get-Variable JunoLease -Scope Script -ErrorAction SilentlyContinue) {
         if ($null -ne $script:JunoLease) { throw 'JUNO ya posee un bloqueo; no se permite adquirirlo recursivamente.' }
@@ -425,10 +450,15 @@ function Read-JunoDocument([string]$path,[string]$kind,[string]$scope,[switch]$L
         Assert-JunoObject $obj @('Format','Version','Kind','Scope','Sid','Machine','Revision','Data')
         Assert-JunoInt $obj.Version 1 1; Assert-JunoGuid $obj.Revision
         $id=Get-JunoIdentity
-        if ($obj.Format -cne 'JUNO.Backup' -or $obj.Kind -cne $kind -or $obj.Scope -cne $scope -or $obj.Machine -ine $id.Machine -or
-            ($scope -eq 'User' -and $obj.Sid -cne $id.Sid) -or ($scope -eq 'Machine' -and $null -ne $obj.Sid)) { throw 'Respaldo de otro usuario, equipo, modulo o ambito.' }
+        if ($obj.Format -cne 'JUNO.Backup') { Stop-JunoBackupValidation 'FormatMismatch' 'Formato de respaldo incompatible.' }
+        if ($obj.Kind -cne $kind) { Stop-JunoBackupValidation 'KindMismatch' 'Respaldo de otro modulo.' }
+        if ($obj.Scope -cne $scope -or ($scope -eq 'Machine' -and $null -ne $obj.Sid)) { Stop-JunoBackupValidation 'ScopeMismatch' 'Respaldo de otro ambito.' }
+        if ($obj.Machine -ine $id.Machine) { Stop-JunoBackupValidation 'MachineMismatch' 'Respaldo de otro equipo.' }
+        if ($scope -eq 'User' -and $obj.Sid -cne $id.Sid) { Stop-JunoBackupValidation 'UserMismatch' 'La identidad del respaldo no coincide con la de esta ejecucion.' }
         $data=$obj.Data
     } else {
+        # General antiguo no contiene SID ni equipo. -Legacy no acredita su procedencia.
+        if ($kind -eq 'General') { Stop-JunoBackupValidation 'UnverifiableLegacy' 'Respaldo general historico sin identidad verificable; requiere recuperacion supervisada.' }
         if ($scope -eq 'Machine' -and -not $Legacy) { throw 'Respaldo de equipo sin identidad; requiere importacion explicita.' }
         $data=$obj
     }
@@ -444,7 +474,12 @@ function Read-JunoStore([string]$kind,[string]$scope='User',$default) {
         return $default
     }
     try { return (Read-JunoDocument $path $kind $scope -Legacy:($scope -eq 'User' -and $kind -eq 'Startup')) }
-    catch { throw "Respaldo invalido o inaccesible ($path): $($_.Exception.Message) No se reemplazo; revisar copias previous e history." }
+    catch {
+        $code=Get-JunoBackupFailureCode $_.Exception
+        if($null -eq $code){$code='InvalidBackup'}
+        # Conservar el diagnóstico al envolverlo, sin publicar datos del archivo.
+        Stop-JunoBackupValidation $code ((Get-JunoBackupFailureText $code)+' No se reemplazo; revisar copias previous e history.')
+    }
 }
 function Get-JunoRecoveryCandidates([string]$path) {
     $folder=[IO.Path]::GetDirectoryName($path)

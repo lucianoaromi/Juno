@@ -5,8 +5,8 @@ $ErrorActionPreference='Stop'
 $dashboardTestRoot=Split-Path $PSScriptRoot -Parent
 if(-not ('Juno.Preview.Testing.ControlledQuery' -as [type])) {
     if('Juno.Preview.ShellForm' -as [type]){throw 'Ejecuta Dashboard.Tests.ps1 en un proceso PowerShell nuevo para compilar sus fixtures junto al shell.'}
-    $files=@('ui\DashboardModel.cs','ui\WindowsSystemSource.cs','ui\DashboardWorker.cs','ui\JunoShell.cs','tests\Dashboard.TestSupport.cs')|ForEach-Object{Join-Path $dashboardTestRoot $_}
-    Add-Type -Path $files -ReferencedAssemblies System.Windows.Forms,System.Drawing,System.Management,System.Web.Extensions
+    $files=@('ui\DashboardModel.cs','ui\WindowsSystemSource.cs','ui\DashboardWorker.cs','ui\TransparencyModel.cs','ui\PowerShellTransparencyService.cs','ui\TransparencyConfirmation.cs','ui\JunoShell.cs','tests\Dashboard.TestSupport.cs','tests\Transparency.TestSupport.cs')|ForEach-Object{Join-Path $dashboardTestRoot $_}
+    Add-Type -Path $files -ReferencedAssemblies @('System.Windows.Forms','System.Drawing','System.Management','System.Web.Extensions',[Management.Automation.PSObject].Assembly.Location)
 }
 function New-DashboardSnapshot {
     $s=New-Object Juno.Preview.DashboardSnapshot
