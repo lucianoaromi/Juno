@@ -1,0 +1,42 @@
+﻿JUNO v0.8 - Windows 10 / Windows 11
+===================================
+Anteriormente: WinRendimiento v0.7.4.
+
+NOVEDADES
+* Cambio de nombre: JUNO.
+* Icono personalizado a partir de Juno.png, con diferentes tamaños en Juno.ico.
+* Icono en ventana principal y en las ventanas de cada herramienta.
+* Imagen en el encabezado de la ventana principal.
+* Creador opcional de acceso directo de escritorio con el icono de JUNO.
+* Mismo orden de modulos, misma logica y mismos respaldos de v0.7.4.
+
+EJECUTAR
+1. Extrae TODO el ZIP en una carpeta propia.
+2. Haz doble clic en Abrir-Juno.cmd.
+3. (Opcional) Haz doble clic en Crear-acceso-directo.cmd para tener un acceso en el escritorio.
+4. No muevas esa carpeta despues de crear el acceso directo (o tendras que recrearlo).
+
+RESPALDOS ANTERIORES
+IMPORTANTE: la ruta sigue siendo %LOCALAPPDATA%\WinRendimiento.
+Esto es intencional para mantener los respaldos de energia, efectos,
+transparencia, inicio, apps en segundo plano y TRIM. NO borres esa carpeta.
+Puedes seguir usando las opciones de restauracion ya existentes.
+
+MODULOS
+1. Plan de energia.
+2. Efectos visuales.
+3. Transparencia de Windows.
+4. Programas de inicio.
+5. Aplicaciones en segundo plano (permisos y procesos activos).
+6. Limpieza inteligente.
+7. Almacenamiento SSD / HDD.
+Restauracion general basica al final.
+
+NOTAS
+* Sigue siendo portable: NO es un .exe compilado.
+* El icono del acceso directo depende de conservar la carpeta y Juno.ico.
+* La limpieza es irreversible. Algunas acciones necesitan permisos de administrador.
+* La gestion de permisos en segundo plano es limitada en Windows 11;
+  escribir una clave no garantiza que Windows cambie el permiso real.
+* No se cambian configuraciones ni se borra nada solo por abrir la app.
+* Probado por inspeccion estatica aqui; hay que probar la interfaz en Windows 10/11.
