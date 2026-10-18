@@ -33,13 +33,14 @@ Describe 'JUNO v0.9: shell visual independiente' {
     BeforeEach {$script:preview=New-Object Juno.Preview.ShellForm($previewRoot)}
     AfterEach {if($null -ne $script:preview){$script:preview.Dispose()}}
 
-    It 'inicia en Inicio con seis destinos y datos expresamente simulados' {
+    It 'inicia en Inicio con seis destinos sin inventar lecturas' {
         $preview.SelectedSection|Should Be 'Inicio'
         $controls=@(Get-PreviewControls $preview)
         @($controls|Where-Object{$_ -is [Windows.Forms.Button] -and $_.Name -like 'Nav*'}).Count|Should Be 6
-        ($controls.Text -join ' ')|Should Match 'DATOS DE DEMOSTRACIÓN'
-        ($controls.Text -join ' ')|Should Match 'no describen esta computadora'
-        foreach($text in @('Windows 11 Pro','AMD Ryzen 5','16 GB','512 GB','Equilibrado')){($controls.Text -contains $text)|Should Be $true}
+        ($controls.Text -join ' ')|Should Match 'LECTURA DEL SISTEMA'
+        ($controls.Text -join ' ')|Should Match 'No disponible'
+        ($controls.Text -join ' ')|Should Not Match 'AMD Ryzen 5|Windows 11 Pro|DATOS DE DEMOSTRACIÓN'
+        $preview.Dashboard.HasRequested|Should Be $false
     }
 
     It 'navega a <Section> en el mismo formulario' -TestCases @(
@@ -65,10 +66,13 @@ Describe 'JUNO v0.9: shell visual independiente' {
         }
     }
 
-    It 'explorar herramientas cambia a Rendimiento sin abrir ventanas' {
-        $button=@(Get-PreviewControls $preview|Where-Object{$_.Name -eq 'Explore'})[0]
+    It 'actualizar inicia una sola consulta sin abrir ventanas' {
+        $button=@(Get-PreviewControls $preview|Where-Object{$_.Name -eq 'RefreshInformation'})[0]
         [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-        $preview.SelectedSection|Should Be 'Rendimiento'
+        $preview.SelectedSection|Should Be 'Inicio'
+        $preview.Dashboard.HasRequested|Should Be $true
+        $preview.Dashboard.IsBusy|Should Be $true
+        $preview.RefreshInformation()|Should Be $false
         @($preview.OwnedForms).Count|Should Be 0
     }
 
@@ -133,7 +137,7 @@ Describe 'JUNO v0.9: shell visual independiente' {
     }
 
     It 'navegar repetidamente dispone la página anterior' {
-        $old=@(Get-PreviewControls $preview|Where-Object{$_.Name -eq 'Welcome'})[0]
+        $old=@(Get-PreviewControls $preview|Where-Object{$_.Name -eq 'DashboardToolbar'})[0]
         1..5|ForEach-Object{foreach($section in [Juno.Preview.ShellForm]::Sections){$preview.Navigate($section)}}
         $old.IsDisposed|Should Be $true
         $preview.Controls.Count|Should Be 4

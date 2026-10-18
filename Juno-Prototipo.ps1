@@ -7,8 +7,8 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 if (-not ('Juno.Preview.ShellForm' -as [type])) {
-    $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ui\JunoShell.cs'))
-    Add-Type -TypeDefinition $source -ReferencedAssemblies System.Windows.Forms,System.Drawing
+    $files=@('ui\DashboardModel.cs','ui\WindowsSystemSource.cs','ui\DashboardWorker.cs','ui\JunoShell.cs')|ForEach-Object{Join-Path $PSScriptRoot $_}
+    Add-Type -Path $files -ReferencedAssemblies System.Windows.Forms,System.Drawing,System.Management,System.Web.Extensions
 }
 if ($LoadOnly) { return }
 if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
@@ -16,6 +16,11 @@ if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
 }
 # Solo afecta al proceso nuevo. No cambia pantalla, Registro ni configuracion del host.
 [Juno.Preview.PreviewHost]::Initialize()
-$window = New-Object Juno.Preview.ShellForm($PSScriptRoot)
-try { [Windows.Forms.Application]::Run($window) }
-finally { $window.Dispose() }
+$query=New-Object Juno.Preview.ProcessDashboardQuery((Join-Path $PSHOME 'powershell.exe'),(Join-Path $PSScriptRoot 'Juno-DashboardWorker.ps1'))
+$dashboard=New-Object Juno.Preview.DashboardController($query)
+$window = $null
+try {
+    $window=New-Object Juno.Preview.ShellForm($PSScriptRoot,$dashboard)
+    [Windows.Forms.Application]::Run($window)
+}
+finally { if($null -ne $window){$window.Dispose()};$dashboard.Dispose() }

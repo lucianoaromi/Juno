@@ -1,5 +1,5 @@
 ﻿// C# 5 / .NET Framework, compilado en memoria por Windows PowerShell 5.1.
-// Presentacion solamente: no carga los modulos estables ni consulta el equipo.
+// Presentacion: recibe instantaneas, sin proveedores de hardware ni motores estables.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -130,6 +130,7 @@ namespace Juno.Preview
             float s=e.Graphics.DpiX/96f;
             Color bg=Selected?Colors.Selected:(Accent?Colors.Amber:(hover&&Enabled?Color.FromArgb(33,41,54):BackColor));
             Color fg=Selected?Colors.Amber:(Accent?Colors.Canvas:(Enabled?Colors.Text:Colors.Muted));
+            if(!Enabled&&Accent){bg=Colors.Selected;fg=Colors.Muted;}
             e.Graphics.Clear(BackColor);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
             using(GraphicsPath path=Shapes.Round(new RectangleF(.5f,.5f,Width-1,Height-1),8*s))
             using(SolidBrush brush=new SolidBrush(bg)) {e.Graphics.FillPath(brush,path);}
@@ -167,8 +168,8 @@ namespace Juno.Preview
         public Tile(string key,string heading,string text,Font normal,Font bold,Font large,string displayValue,bool tool,float scale)
         {
             Key=key;Name=key;AccessibleName=heading;
-            Padding=new Padding((int)(22*scale));
-            stack=new VStack();stack.Gap=(int)(10*scale);stack.BackColor=Colors.Card;
+            Padding=new Padding((int)(20*scale));
+            stack=new VStack();stack.Gap=(int)(8*scale);stack.BackColor=Colors.Card;
             Glyph icon=new Glyph(key);icon.Size=new Size((int)(24*scale),(int)(24*scale));icon.AccessibleName=heading+" (icono)";
             title=MakeLabel(heading,bold,Colors.Text);
             detail=MakeLabel(text,normal,Colors.Muted);
@@ -176,6 +177,7 @@ namespace Juno.Preview
             if(displayValue!=null){value=MakeLabel(displayValue,large,Colors.Text);stack.Controls.Add(value);}
             stack.Controls.Add(detail);
             if(tool){
+                Label state=MakeLabel(ToolStateText.Describe(ToolAvailability.PendingIntegration),normal,Colors.Amber);state.Name="ToolState";stack.Controls.Add(state);
                 PreviewButton action=new PreviewButton();action.Text="Sin conectar";action.Name="ToolAction";action.AccessibleDescription="Herramienta no conectada en este prototipo";action.Enabled=false;action.Font=normal;action.Height=(int)(40*scale);action.Dock=DockStyle.None;
                 stack.Controls.Add(action);
             }
@@ -183,6 +185,8 @@ namespace Juno.Preview
         }
         internal static Label MakeLabel(string text,Font font,Color color)
         {return new Label{Text=text,Font=font,ForeColor=color,AutoSize=true,BackColor=Color.Transparent,UseMnemonic=false,Margin=Padding.Empty};}
+        public void SetReadingState(string text,Font font)
+        {Label state=MakeLabel(text,font,Colors.Muted);state.Name="ReadingState";stack.Controls.Add(state);}
         private void SetWidths(int width)
         {foreach(Control c in stack.Controls){Label label=c as Label;if(label!=null)label.MaximumSize=new Size(Math.Max(1,width),0);}}
         public override Size GetPreferredSize(Size proposedSize)
@@ -222,7 +226,7 @@ namespace Juno.Preview
 
     public class ShellForm : Form
     {
-        public const string PreviewVersion="0.9 · Prototipo 01";
+        public const string PreviewVersion="0.9 · Etapa 2";
         public const string RepositoryUrl="https://github.com/lucianoaromi/Juno";
         public static readonly string[] Sections={"Inicio","Rendimiento","Aplicaciones","Mantenimiento","Restauración","Acerca de"};
         public string SelectedSection {get;private set;}
@@ -233,18 +237,25 @@ namespace Juno.Preview
         private Panel sidebar,main,header,footer,viewport;
         private VStack page;
         private Label breadcrumb,status;
-        private Font normal,small,bold,heading,display,metric;
+        private Font normal,small,bold,heading,metric;
         private Bitmap logo;
         private float scale=1;
         private bool layingOut;
+        private readonly DashboardController dashboard;
+        private readonly Timer dashboardTimer;
+        private Label dashboardStatus;
+        public DashboardController Dashboard {get{return dashboard;}}
 
-        public ShellForm(string assetRoot)
+        public ShellForm(string assetRoot):this(assetRoot,new DashboardController(new UnavailableDashboardQuery())){}
+        public ShellForm(string assetRoot,DashboardController controller)
         {
+            if(controller==null)throw new ArgumentNullException("controller");dashboard=controller;
+            dashboardTimer=new Timer();dashboardTimer.Interval=100;dashboardTimer.Tick+=delegate{if(dashboard.Poll())RefreshDashboardView();if(!dashboard.IsBusy)dashboardTimer.Stop();};
             Text="JUNO v0.9 | Prototipo de interfaz";Name="JunoPreview";
             StartPosition=FormStartPosition.CenterScreen;
             BackColor=Colors.Canvas;ForeColor=Colors.Text;
             normal=OwnFont(10,FontStyle.Regular);small=OwnFont(9,FontStyle.Regular);bold=OwnFont(11,FontStyle.Bold);
-            heading=OwnFont(24,FontStyle.Bold);display=OwnFont(29,FontStyle.Bold);metric=OwnFont(20,FontStyle.Bold);
+            heading=OwnFont(24,FontStyle.Bold);metric=OwnFont(16,FontStyle.Bold);
             // Una sola estrategia: medidas logicas * DPI del proceso, fuentes en puntos.
             // No combina escalado automatico y manual ni reconfigura el host PowerShell.
             Font=normal;AutoScaleMode=AutoScaleMode.None;
@@ -257,7 +268,7 @@ namespace Juno.Preview
             main=new Panel{BackColor=Colors.Canvas,Name="Main"};
             footer=new Panel{BackColor=Colors.Canvas,Name="Footer"};
             viewport=new Panel{BackColor=Colors.Canvas,AutoScroll=true,Name="ContentViewport"};
-            page=new VStack{BackColor=Colors.Canvas,Name="Page",Gap=(int)(24*scale)};
+            page=new VStack{BackColor=Colors.Canvas,Name="Page",Gap=(int)(20*scale)};
             viewport.Controls.Add(page);main.Controls.Add(viewport);
             Controls.AddRange(new Control[]{sidebar,main,header,footer});
             BuildSidebar();BuildHeader();BuildFooter();
@@ -287,12 +298,12 @@ namespace Juno.Preview
         private void BuildHeader()
         {
             breadcrumb=Tile.MakeLabel("ESPACIO DE TRABAJO  /  Inicio",small,Colors.Muted);breadcrumb.AutoSize=false;breadcrumb.AutoEllipsis=true;header.Controls.Add(breadcrumb);
-            Label badge=Tile.MakeLabel("●  DATOS DE DEMOSTRACIÓN",OwnFont(8,FontStyle.Bold),Colors.Amber);badge.Name="DemoBadge";badge.AutoSize=false;badge.TextAlign=ContentAlignment.MiddleRight;header.Controls.Add(badge);
+            Label badge=Tile.MakeLabel("●  SOLO LECTURA",OwnFont(8,FontStyle.Bold),Colors.Amber);badge.Name="InformationBadge";badge.AutoSize=false;badge.TextAlign=ContentAlignment.MiddleRight;header.Controls.Add(badge);
             header.Paint+=delegate(object sender,PaintEventArgs e){using(Pen pen=new Pen(Colors.Border)){e.Graphics.DrawLine(pen,0,header.Height-1,header.Width,header.Height-1);}};
         }
         private void BuildFooter()
         {
-            status=Tile.MakeLabel("Vista previa · Ninguna herramienta está conectada a Windows",small,Colors.Muted);status.Name="PreviewStatus";footer.Controls.Add(status);
+            status=Tile.MakeLabel("Dashboard de solo lectura · Herramientas pendientes de integración",small,Colors.Muted);status.Name="PreviewStatus";footer.Controls.Add(status);
         }
         private Label TextLabel(string text,Font font,Color color){return Tile.MakeLabel(text,font,color);}
         private VStack Intro(string eyebrow,string title,string description)
@@ -308,9 +319,11 @@ namespace Juno.Preview
             if(!navigation.ContainsKey(section))throw new ArgumentException("Sección desconocida.","section");
             viewport.AutoScrollPosition=Point.Empty;
             while(page.Controls.Count>0){Control old=page.Controls[0];page.Controls.Remove(old);old.Dispose();}
+            dashboardStatus=null;
             SelectedSection=section;breadcrumb.Text="ESPACIO DE TRABAJO  /  "+section;
             foreach(KeyValuePair<string,PreviewButton> pair in navigation){pair.Value.Selected=pair.Key==section;pair.Value.AccessibleDescription=pair.Value.Selected?"Sección seleccionada":"Ir a "+pair.Key;pair.Value.Invalidate();}
-            status.Text="Vista previa · Ninguna herramienta está conectada a Windows";
+            status.Text="Dashboard de solo lectura · Herramientas pendientes de integración";
+            header.Controls["InformationBadge"].Text=section=="Inicio"?"●  LECTURA DEL SISTEMA":"●  HERRAMIENTAS SIN CONECTAR";
             switch(section){
                 case "Inicio":BuildHome();break;
                 case "Rendimiento":BuildPerformance();break;
@@ -323,25 +336,32 @@ namespace Juno.Preview
         }
         private void BuildHome()
         {
-            page.Controls.Add(Intro("TU ESPACIO JUNO","Todo tu equipo, en un solo lugar.","Explora las herramientas de rendimiento y mantenimiento con una vista más clara."));
-            Surface welcome=new Surface{Name="Welcome",Padding=new Padding((int)(22*scale))};
-            VStack content=new VStack{Gap=(int)(12*scale),Dock=DockStyle.Fill};
-            content.Controls.Add(TextLabel("Una nueva mirada a tu PC",display,Colors.Text));
-            content.Controls.Add(TextLabel("El mismo cuidado. Una interfaz más simple.\nEste recorrido es una demostración: no lee ni modifica tu equipo.",normal,Colors.Muted));
-            PreviewButton explore=new PreviewButton{Text="Explorar herramientas  →",Accent=true,Font=normal,Height=(int)(42*scale),Name="Explore"};explore.Click+=delegate{Navigate("Rendimiento");};content.Controls.Add(explore);
-            welcome.Controls.Add(content);welcome.Tag=content;page.Controls.Add(welcome);
-            page.Controls.Add(Intro("RESUMEN DEL EQUIPO","Una vista de ejemplo","Los siguientes valores son simulados; no describen esta computadora."));
+            page.Controls.Add(Intro("TU EQUIPO","Información del sistema","Una instantánea de Windows. Consultas de solo lectura, sin monitoreo continuo."));
+            VStack toolbar=new VStack{Gap=(int)(8*scale),Name="DashboardToolbar"};
+            PreviewButton refresh=new PreviewButton{Text=dashboard.IsBusy?"Actualizando información…":"Actualizar información",Accent=true,Font=normal,Height=(int)(42*scale),Name="RefreshInformation",Enabled=!dashboard.IsBusy};
+            refresh.Click+=delegate{RefreshInformation();};toolbar.Controls.Add(refresh);
+            dashboardStatus=TextLabel(DashboardPresentation.Status(dashboard),normal,Colors.Muted);dashboardStatus.Name="DashboardState";toolbar.Controls.Add(dashboardStatus);page.Controls.Add(toolbar);
             TileGrid grid=Grid(3);
-            grid.Controls.Add(new Tile("os","Sistema operativo","Ejemplo · edición y versión",normal,bold,metric,"Windows 11 Pro",false,scale));
-            grid.Controls.Add(new Tile("cpu","Procesador","Ejemplo · 6 núcleos / 12 hilos",normal,bold,metric,"AMD Ryzen 5",false,scale));
-            grid.Controls.Add(new Tile("ram","Memoria RAM","Ejemplo · capacidad instalada",normal,bold,metric,"16 GB",false,scale));
-            grid.Controls.Add(new Tile("disk","Almacenamiento","Ejemplo · SSD NVMe",normal,bold,metric,"512 GB",false,scale));
-            grid.Controls.Add(new Tile("power","Plan de energía","Ejemplo · plan activo",normal,bold,metric,"Equilibrado",false,scale));
+            foreach(string key in DashboardWire.Keys){DashboardCard data=DashboardPresentation.Card(key,dashboard.Snapshot,dashboard.IsBusy);Tile tile=new Tile(key,data.Title,data.Detail,normal,bold,metric,data.Value,false,scale);tile.SetReadingState(data.State,small);tile.AccessibleDescription=data.State;grid.Controls.Add(tile);}
             page.Controls.Add(grid);
+        }
+        public bool RefreshInformation()
+        {
+            if(!dashboard.Refresh())return false;
+            RefreshDashboardView();dashboardTimer.Start();return true;
+        }
+        private void RefreshDashboardView()
+        {
+            if(IsDisposed||Disposing)return;
+            if(SelectedSection=="Inicio"){
+                int scroll=-viewport.AutoScrollPosition.Y;
+                while(page.Controls.Count>0){Control old=page.Controls[0];page.Controls.Remove(old);old.Dispose();}
+                BuildHome();LayoutPage();viewport.AutoScrollPosition=new Point(0,scroll);
+            }
         }
         private void BuildPerformance()
         {
-            page.Controls.Add(Intro("RENDIMIENTO","Ajustes con intención.","Energía y apariencia, reunidas en un solo espacio. Herramientas pendientes de integración."));
+            page.Controls.Add(Intro("RENDIMIENTO","Configuración de rendimiento","Energía y apariencia, reunidas en un solo espacio. Herramientas pendientes de integración."));
             TileGrid grid=Grid(2);
             grid.Controls.Add(Tool("power","Plan de energía","Consultar planes disponibles y solicitar cambios compatibles con el equipo."));
             grid.Controls.Add(Tool("display","Efectos visuales","Elegir una apariencia equilibrada entre claridad, animaciones y legibilidad."));
@@ -375,12 +395,12 @@ namespace Juno.Preview
         {
             page.Controls.Add(Intro("ACERCA DE","JUNO, una nueva etapa.","Herramientas para comprender y gestionar Windows con decisiones explícitas."));
             TileGrid grid=Grid(2);
-            grid.Controls.Add(new Tile("Acerca de","JUNO "+PreviewVersion,"Prototipo visual para Windows 10 y Windows 11. PowerShell 5.1, Windows Forms y .NET Framework.",normal,bold,metric,null,false,scale));
-            grid.Controls.Add(new Tile("Acerca de","Diseñado para integrar","La versión estable v0.8.1 conserva su entrada y sus módulos. Esta interfaz todavía no ejecuta sus operaciones.",normal,bold,metric,null,false,scale));page.Controls.Add(grid);
+            grid.Controls.Add(new Tile("Acerca de","JUNO "+PreviewVersion,"Dashboard de solo lectura para Windows 10 y Windows 11. PowerShell 5.1, Windows Forms y .NET Framework.",normal,bold,metric,null,false,scale));
+            grid.Controls.Add(new Tile("Acerca de","Diseñado para integrar","La versión estable v0.8.1 conserva su entrada y sus módulos. Las herramientas de optimización siguen desconectadas.",normal,bold,metric,null,false,scale));page.Controls.Add(grid);
             VStack project=new VStack{Gap=(int)(12*scale)};project.Controls.Add(TextLabel("PROYECTO ABIERTO",small,Colors.Amber));
             LinkLabel link=new LinkLabel{Text="github.com/lucianoaromi/Juno ↗",AutoSize=true,Font=bold,LinkColor=Colors.Amber,ActiveLinkColor=Colors.Text,VisitedLinkColor=Colors.Amber,Name="GitHub",AccessibleDescription=RepositoryUrl};
             link.LinkClicked+=delegate{try{Process.Start(new ProcessStartInfo(RepositoryUrl){UseShellExecute=true});}catch(Exception){status.Text="No se pudo abrir el navegador. Enlace: "+RepositoryUrl;}};
-            project.Controls.Add(link);project.Controls.Add(TextLabel("Propuesta de diseño · Etapa 1\nLa integración de herramientas requiere aprobar primero esta interfaz.",normal,Colors.Muted));page.Controls.Add(project);
+            project.Controls.Add(link);project.Controls.Add(TextLabel("Interfaz aprobada · Etapa 2\nLa integración de herramientas corresponde a una etapa posterior.",normal,Colors.Muted));page.Controls.Add(project);
         }
         protected override void OnLayout(LayoutEventArgs e)
         {
@@ -394,7 +414,7 @@ namespace Juno.Preview
                     main.SetBounds(side,top,Math.Max(1,ClientSize.Width-side),Math.Max(1,ClientSize.Height-top-bottom));
                     footer.SetBounds(side,ClientSize.Height-bottom,Math.Max(1,ClientSize.Width-side),bottom);
                     viewport.Dock=DockStyle.Fill;
-                    Label badge=header.Controls["DemoBadge"] as Label;
+                    Label badge=header.Controls["InformationBadge"] as Label;
                     bool compact=header.Width<640*scale;
                     if(breadcrumb!=null)breadcrumb.SetBounds((int)(32*scale),compact?(int)(13*scale):(int)(26*scale),Math.Max(1,header.Width-(int)((compact?64:320)*scale)),(int)(20*scale));
                     if(badge!=null){badge.SetBounds(compact?(int)(32*scale):header.Width-(int)(280*scale),compact?(int)(40*scale):(int)(26*scale),Math.Max(1,(int)((compact?header.Width/scale-64:248)*scale)),(int)(20*scale));badge.TextAlign=compact?ContentAlignment.MiddleLeft:ContentAlignment.MiddleRight;}
@@ -442,11 +462,11 @@ namespace Juno.Preview
             MinimumSize=new Size(Math.Min(MinimumSize.Width,Math.Max(1,area.Width-24)),Math.Min(MinimumSize.Height,Math.Max(1,area.Height-24)));
             Size=new Size(Math.Min(Width,area.Width-24),Math.Min(Height,area.Height-24));
             Location=new Point(area.Left+(area.Width-Width)/2,area.Top+(area.Height-Height)/2);
-            base.OnShown(e);LayoutPage();
+            base.OnShown(e);LayoutPage();if(!dashboard.HasRequested)RefreshInformation();
         }
         protected override void Dispose(bool disposing)
         {
-            if(disposing&&!ResourcesReleased){base.Dispose(true);foreach(IDisposable asset in assets)asset.Dispose();foreach(Font font in fonts)font.Dispose();ResourcesReleased=true;return;}
+            if(disposing&&!ResourcesReleased){dashboardTimer.Stop();dashboardTimer.Dispose();dashboard.Dispose();base.Dispose(true);foreach(IDisposable asset in assets)asset.Dispose();foreach(Font font in fonts)font.Dispose();ResourcesReleased=true;return;}
             base.Dispose(disposing);
         }
     }
