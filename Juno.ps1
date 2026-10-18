@@ -12,6 +12,17 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     exit 1
 }
 
+. (Join-Path $PSScriptRoot 'BackupStore.ps1')
+. (Join-Path $PSScriptRoot 'RecoveryOperations.ps1')
+try { Enter-JunoLease }
+catch {
+    [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'JUNO - recurso ocupado o inaccesible', 'OK', 'Warning')
+    exit 1
+}
+try {
+if ($script:JunoLease.Abandoned) {
+    [void][System.Windows.Forms.MessageBox]::Show('La instancia anterior termino sin liberar el bloqueo. JUNO validara los respaldos antes de cualquier cambio; revisa las operaciones pendientes.', 'JUNO - sesion interrumpida', 'OK', 'Warning')
+}
 $nativeCode = @'
 using System;
 using System.Runtime.InteropServices;
@@ -61,30 +72,14 @@ $script:EffectCodes = [ordered]@{
 }
 
 function Get-Backup {
-    if (Test-Path -LiteralPath $script:BackupPath) {
-        $backup = Get-Content -LiteralPath $script:BackupPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        # Compatible con copias de la version 0.1: nunca se pierden.
-        if (-not ($backup.PSObject.Properties.Name -contains 'VisualRegistry')) {
-            Add-Member -InputObject $backup -MemberType NoteProperty -Name VisualRegistry -Value $null
-        }
-        # Compatible con el respaldo de las versiones 0.1 y 0.2.
-        if (-not ($backup.PSObject.Properties.Name -contains 'TransparencyBackup')) {
-            Add-Member -InputObject $backup -MemberType NoteProperty -Name TransparencyBackup -Value $null
-        }
-        return $backup
+    $backup=Read-JunoStore 'General' 'User' ([pscustomobject]@{PowerScheme=$null;CreatedPowerScheme=$null;VisualEffects=$null;VisualRegistry=$null;TransparencyBackup=$null})
+    foreach ($name in @('VisualRegistry','TransparencyBackup')) {
+        if ($backup.PSObject.Properties.Name -notcontains $name) { Add-Member -InputObject $backup NoteProperty $name $null }
     }
-    return [pscustomobject]@{ PowerScheme = $null; CreatedPowerScheme = $null; VisualEffects = $null; VisualRegistry = $null; TransparencyBackup = $null }
+    if ($backup.PSObject.Properties.Name -notcontains 'Journal') { Add-Member -InputObject $backup NoteProperty Journal ([pscustomobject]@{Version=1;Visual=$null;Transparency=$null}) }
+    return $backup
 }
-function Save-Backup($backup) {
-    if (-not (Test-Path -LiteralPath $script:AppFolder)) {
-        New-Item -Path $script:AppFolder -ItemType Directory -Force | Out-Null
-    }
-    $json = $backup | ConvertTo-Json -Depth 10
-    # Reemplazo atomico razonable: evita guardar un JSON truncado.
-    $temp = "$($script:BackupPath).tmp"
-    Set-Content -LiteralPath $temp -Value $json -Encoding UTF8
-    Move-Item -LiteralPath $temp -Destination $script:BackupPath -Force
-}
+function Save-Backup($backup) { Write-JunoStore 'General' $backup 'User' }
 function Get-GuidFromText([string]$text) {
     $match = [regex]::Match($text, $script:GuidPattern)
     if ($match.Success) { return $match.Value.ToLowerInvariant() }
@@ -103,53 +98,8 @@ function Get-ActivePlan {
     if (-not $guid) { throw 'No se pudo reconocer el identificador del plan activo.' }
     return @{ Guid=$guid; Text=$text.Trim() }
 }
-function Enable-HighPerformance {
-    $before = Get-ActivePlan
-    $backup = Get-Backup
-    $plans = Invoke-PowerCfg @('/list')
-
-    if (-not $backup.PowerScheme) {
-        $backup.PowerScheme = $before.Guid
-        Save-Backup $backup
-    }
-
-    $highPlanGuid = $script:HighPerformanceGuid
-    $baseExists = [regex]::IsMatch($plans, [regex]::Escape($script:HighPerformanceGuid), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    $previouslyCreated = [string]$backup.CreatedPowerScheme
-    $createdExists = $previouslyCreated -and [regex]::IsMatch($plans, [regex]::Escape($previouslyCreated), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if (-not $baseExists -and $createdExists) {
-        # Reutilizar nuestra copia para no duplicar planes con cada clic.
-        $highPlanGuid = $previouslyCreated
-    } elseif (-not $baseExists) {
-        # No cambiar el registro para deshabilitar Modern Standby.
-        $created = Invoke-PowerCfg @('/duplicatescheme', $script:HighPerformanceGuid)
-        $highPlanGuid = Get-GuidFromText $created
-        if (-not $highPlanGuid) { throw 'Se intento crear el plan, pero no se pudo leer su identificador.' }
-        $backup.CreatedPowerScheme = $highPlanGuid
-        Save-Backup $backup
-    }
-    Invoke-PowerCfg @('/setactive', $highPlanGuid) | Out-Null
-    $after = Get-ActivePlan
-    if ($after.Guid -ne $highPlanGuid) {
-        throw 'Windows no mantuvo seleccionado el plan Alto rendimiento.'
-    }
-    return "Plan de Alto rendimiento activado: $highPlanGuid"
-}
-function Restore-PowerPlan {
-    $backup = Get-Backup
-    if (-not $backup.PowerScheme) { return 'No hay un plan de energia anterior guardado.' }
-    Invoke-PowerCfg @('/setactive', [string]$backup.PowerScheme) | Out-Null
-    $active = Get-ActivePlan
-    if ($active.Guid -ne $backup.PowerScheme) { throw 'Windows no pudo restaurar el plan anterior.' }
-    if ($backup.CreatedPowerScheme -and $backup.CreatedPowerScheme -ne $backup.PowerScheme) {
-        # Elimina unicamente el plan que creo JUNO.
-        Invoke-PowerCfg @('/delete', [string]$backup.CreatedPowerScheme) | Out-Null
-        $backup.CreatedPowerScheme = $null
-    }
-    $backup.PowerScheme = $null
-    Save-Backup $backup
-    return 'Se restauro el plan previo y se elimino la copia creada por JUNO (si existia).'
-}
+function Enable-HighPerformance { Invoke-JunoPower $false }
+function Restore-PowerPlan { Invoke-JunoPower $true }
 
 # SPI_GET...BOOL recibe un puntero; SPI_SET...BOOL recibe el BOOL por valor.
 # El error de la v0.1 era pasar ref int tambien al SET: se interpretaba
@@ -230,6 +180,10 @@ function Get-VisualRegistrySnapshot {
     return ,$snapshot
 }
 function Set-RegistryVisual([string]$subkey, [string]$name, $value, [string]$kind) {
+    Assert-JunoLease
+    $match=@(Get-JunoVisualTargets | Where-Object { $_[0] -ceq $subkey -and $_[1] -ceq $name -and $_[2] -ceq $kind })
+    if ($match.Count -ne 1) { throw 'Destino visual no permitido.' }
+    Assert-JunoVisualSnapshot ([pscustomobject]@{Exists=$true;Kind=$kind;Value=[string]$value}) -Transparency:($name -eq 'EnableTransparency')
     $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($subkey)
     if ($null -eq $key) { throw "No se pudo abrir registro HKCU\$subkey" }
     try {
@@ -243,6 +197,8 @@ function Set-RegistryVisual([string]$subkey, [string]$name, $value, [string]$kin
     } finally { $key.Close() }
 }
 function Restore-VisualRegistry($snapshots) {
+    Assert-JunoLease
+    Assert-JunoVisualRegistry $snapshots
     foreach ($snap in $snapshots) {
         if ([bool]$snap.Exists) {
             Set-RegistryVisual ([string]$snap.Key) ([string]$snap.Name) $snap.Value ([string]$snap.Kind)
@@ -253,88 +209,8 @@ function Restore-VisualRegistry($snapshots) {
         }
     }
 }
-function Apply-VisualEffects([bool]$keepFont) {
-    $backup = Get-Backup
-    if (-not $backup.VisualEffects) {
-        $current = Get-CurrentEffects
-        if ($current.Count -eq 0) { throw 'Windows no permite consultar los efectos visuales.' }
-        $backup.VisualEffects = $current
-    }
-    if (-not $backup.VisualRegistry) {
-        $backup.VisualRegistry = Get-VisualRegistrySnapshot
-    }
-    # Guardamos AMBAS copias antes de modificar nada.
-    Save-Backup $backup
-
-    $failures = New-Object System.Collections.Generic.List[string]
-    $successCount = 0
-    # Primero los ajustes individuales, luego el interruptor general.
-    foreach ($name in $script:EffectCodes.Keys) {
-        if ($name -eq 'UIEffects') { continue }
-        if (-not (Set-EffectValue $script:EffectCodes[$name][1] $false)) {
-            $failures.Add($name)
-        } else { $successCount++ }
-    }
-    if (Set-MinimizeAnimation $false) { $successCount++ } else { $failures.Add('MinimizeAnimation') }
-    if (Set-UiParamSwitch 0x0025 $false) { $successCount++ } else { $failures.Add('DragFullWindows') }
-    if (Set-UiParamSwitch 0x004B $keepFont) { $successCount++ } else { $failures.Add('FontSmoothing') }
-    if (Set-EffectValue $script:EffectCodes['UIEffects'][1] $false) { $successCount++ } else { $failures.Add('UIEffects') }
-
-    $advanced = 'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
-    $desktop = 'Control Panel\Desktop'
-    Set-RegistryVisual $advanced 'TaskbarAnimations' 0 'DWord'
-    Set-RegistryVisual $advanced 'IconsOnly' 1 'DWord'
-    Set-RegistryVisual $advanced 'ListviewAlphaSelect' 0 'DWord'
-    Set-RegistryVisual $advanced 'ListviewShadow' 0 'DWord'
-    Set-RegistryVisual 'Software\Microsoft\Windows\DWM' 'EnableAeroPeek' 0 'DWord'
-    Set-RegistryVisual $desktop 'DragFullWindows' '0' 'String'
-    Set-RegistryVisual $desktop 'FontSmoothing' $(if ($keepFont) { '2' } else { '0' }) 'String'
-    Set-RegistryVisual 'Control Panel\Desktop\WindowMetrics' 'MinAnimate' '0' 'String'
-    # Para fuentes nitidas hay UNA casilla activa y corresponde a Personalizar.
-    # Si no se conserva ninguna, usar el mismo preset de Windows: 2.
-    $preset = if ($keepFont) { 3 } else { 2 }
-    Set-RegistryVisual 'Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' 'VisualFXSetting' $preset 'DWord'
-
-    $remaining = @()
-    foreach ($name in $script:EffectCodes.Keys) {
-        $observed = Get-EffectValue $script:EffectCodes[$name][0]
-        if ($null -ne $observed -and $observed) { $remaining += $name }
-    }
-    if (Get-MinimizeAnimation) { $remaining += 'MinimizeAnimation' }
-    if ($remaining.Count -gt 0) { $failures.Add("Sin desactivar (comprobacion): $($remaining -join ', ')") }
-    $mode = if ($keepFont) { 'Personalizar (letras nitidas)' } else { 'Ajustar para obtener el mejor rendimiento' }
-    $message = "$mode. $successCount cambios realizados."
-    if ($failures.Count -gt 0) { $message += "`nAvisos: $($failures -join '; ')." }
-    $message += "`nVerifica en 'Ver efectos en Windows'. Es posible que debas cerrar sesion para actualizar el Explorador."
-    return $message
-}
-function Restore-VisualEffects {
-    $backup = Get-Backup
-    if (-not $backup.VisualEffects -and -not $backup.VisualRegistry) { return 'No hay efectos visuales anteriores guardados.' }
-    $errors = New-Object System.Collections.Generic.List[string]
-    if ($backup.VisualEffects) {
-        foreach ($entry in $backup.VisualEffects.PSObject.Properties) {
-            $name = $entry.Name
-            $original = [bool]$entry.Value
-            if ($name -eq 'MinimizeAnimation') {
-                if (-not (Set-MinimizeAnimation $original)) { $errors.Add($name) }
-            } elseif ($name -eq 'FontSmoothing') {
-                if (-not (Set-UiParamSwitch 0x004B $original)) { $errors.Add($name) }
-            } elseif ($name -eq 'DragFullWindows') {
-                if (-not (Set-UiParamSwitch 0x0025 $original)) { $errors.Add($name) }
-            } elseif ($script:EffectCodes.Contains($name)) {
-                if (-not (Set-EffectValue $script:EffectCodes[$name][1] $original)) { $errors.Add($name) }
-            }
-        }
-    }
-    # El registro se restaura al final, porque las llamadas SPI pueden escribirlo.
-    if ($backup.VisualRegistry) { Restore-VisualRegistry $backup.VisualRegistry }
-    if ($errors.Count -gt 0) { throw "No se restauraron por completo: $($errors -join ', '). Se conserva la copia para reintentar." }
-    $backup.VisualEffects = $null
-    $backup.VisualRegistry = $null
-    Save-Backup $backup
-    return 'Efectos visuales restaurados desde la copia original. Algunos requieren cerrar sesion.'
-}
+function Apply-VisualEffects([bool]$keepFont) { Invoke-JunoVisual $false $keepFont }
+function Restore-VisualEffects { Invoke-JunoVisual $true }
 
 # Transparencia no forma parte del cuadro clasico "Opciones de rendimiento".
 # Clave documentada por Microsoft (HKCU, sin permisos de administrador).
@@ -365,36 +241,8 @@ function Notify-TransparencyChange {
         return ($sent -ne [IntPtr]::Zero)
     } catch { return $false }
 }
-function Set-Transparency([bool]$enabled) {
-    $backup = Get-Backup
-    if ($null -eq $backup.TransparencyBackup) {
-        # Se guarda una sola vez el valor ORIGINAL, aunque se pulse varias veces.
-        $backup.TransparencyBackup = Get-TransparencySnapshot
-        Save-Backup $backup
-    }
-    Set-RegistryVisual $script:TransparencyKey 'EnableTransparency' ([int]$enabled) 'DWord'
-    $now = Get-TransparencyState
-    if ($null -eq $now -or $now -ne $enabled) { throw 'No se pudo confirmar el valor de transparencia en el Registro.' }
-    [void](Notify-TransparencyChange)
-    $mode = if ($enabled) { 'activada' } else { 'desactivada' }
-    return "Transparencia $mode. Comprobado en el Registro. Si aun ves el efecto, cierra sesion y vuelve a entrar."
-}
-function Restore-Transparency {
-    $backup = Get-Backup
-    if ($null -eq $backup.TransparencyBackup) { return 'Transparencia: no hay un valor anterior guardado.' }
-    $entry = $backup.TransparencyBackup
-    Restore-VisualRegistry @([pscustomobject]@{
-        Key=$script:TransparencyKey;
-        Name='EnableTransparency';
-        Exists=[bool]$entry.Exists;
-        Kind=$entry.Kind;
-        Value=$entry.Value
-    })
-    [void](Notify-TransparencyChange)
-    $backup.TransparencyBackup = $null
-    Save-Backup $backup
-    return 'Transparencia: se restauro el valor original (o su ausencia).'
-}
+function Set-Transparency([bool]$enabled) { Invoke-JunoTransparency $false $enabled }
+function Restore-Transparency { Invoke-JunoTransparency $true }
 
 # Modulo separado: no modifica las funciones anteriores.
 . (Join-Path $PSScriptRoot 'Inicio.ps1')
@@ -491,7 +339,7 @@ $form.Controls.Add($scrollHost)
 # Se conserva la altura compacta para pantallas con resolucion vertical reducida.
 $panelPower = New-Panel 22 6 666 116
 $panelPower.Controls.Add((New-Label '1. Plan de energia' 17 7 600 28 15 $true $white))
-$panelPower.Controls.Add((New-Label 'Activa Alto rendimiento. Si falta, intenta crear el plan oficial.' 17 37 620 25 10 $false $muted))
+$panelPower.Controls.Add((New-Label 'Alto rendimiento (administrador). Si falta, crea el plan oficial.' 17 37 620 25 10 $false $muted))
 $btnPower = New-Button 'Activar Alto rendimiento' 17 70 282 36 $green
 $btnPlans = New-Button 'Ver planes de energia' 317 70 330 36 $gray
 $panelPower.Controls.Add($btnPower)
@@ -589,7 +437,7 @@ function Show-Result([string]$message,[bool]$isError) {
 }
 $btnPower.Add_Click({
     try { Show-Result (Enable-HighPerformance) $false }
-    catch { Show-Result ("No se activo Alto rendimiento. $($_.Exception.Message)`n`nSi el equipo utiliza Modern Standby, Windows puede limitar los planes. No se modifico el modo de suspension.") $true }
+    catch { Show-Result ("Operacion de energia pendiente o fallida: $($_.Exception.Message)`n`nRevisa el plan activo antes de reintentar. Modern Standby puede limitar los planes disponibles.") $true }
 })
 $btnPlans.Add_Click({ Start-Process 'control.exe' -ArgumentList 'powercfg.cpl' })
 $btnVisual.Add_Click({
@@ -656,3 +504,5 @@ $btnRestore.Add_Click({
 [void][System.Windows.Forms.Application]::Run($form)
 if ($null -ne $script:JunoImage) { $script:JunoImage.Dispose() }
 if ($null -ne $script:JunoIcon) { $script:JunoIcon.Dispose() }
+
+} finally { Exit-JunoLease }

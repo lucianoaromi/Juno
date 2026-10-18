@@ -158,21 +158,25 @@ function Get-StartupEntries {
     return $items.ToArray()
 }
 function Get-StartupBackup {
-    if (-not (Test-Path -LiteralPath $script:StartupBackupPath)) { return [pscustomobject]@{ Entries=@() } }
-    $data = Get-Content -LiteralPath $script:StartupBackupPath -Encoding UTF8 -Raw | ConvertFrom-Json
-    if (-not ($data.PSObject.Properties.Name -contains 'Entries') -or $null -eq $data.Entries) {
-        throw 'El archivo de copia de inicio esta incompleto. No se hicieron cambios.'
+    $user=Read-JunoStore 'Startup' 'User' ([pscustomobject]@{Entries=@()})
+    # Los registros HKLM historicos solo se muestran; escribir requiere importacion revisada.
+    $machine=@()
+    if (Test-JunoAdmin) {
+        $saved=Read-JunoStore 'Startup' 'Machine' $null
+        if ($null -ne $saved) { $machine=@($saved.Entries) }
+        else { $machine=@($user.Entries | Where-Object {$_.ApprovalHive -eq 'LocalMachine'}) }
     }
-    return $data
+    return [pscustomobject]@{Entries=@($user.Entries | Where-Object {$_.ApprovalHive -eq 'CurrentUser'})+$machine}
 }
 function Save-StartupBackup($backup) {
-    if (-not (Test-Path -LiteralPath $script:AppFolder)) {
-        New-Item -ItemType Directory -Path $script:AppFolder -Force | Out-Null
-    }
-    $tmp = "$($script:StartupBackupPath).tmp"
-    $json = $backup | ConvertTo-Json -Depth 8
-    Set-Content -LiteralPath $tmp -Encoding UTF8 -Value $json
-    Move-Item -LiteralPath $tmp -Destination $script:StartupBackupPath -Force
+    Assert-JunoLease
+    Assert-JunoStartupData $backup 'Any'
+    $machine=[pscustomobject]@{Entries=@($backup.Entries | Where-Object {$_.ApprovalHive -eq 'LocalMachine'})}
+    if (Test-JunoAdmin) {
+        Import-JunoMachineLegacy 'Startup'
+        Write-JunoStore 'Startup' $machine 'Machine'
+    } elseif ($machine.Entries.Count -gt 0) { throw 'No hay permisos para guardar cambios de inicio del equipo.' }
+    Write-JunoStore 'Startup' ([pscustomobject]@{Entries=@($backup.Entries | Where-Object {$_.ApprovalHive -eq 'CurrentUser'})}) 'User'
 }
 function Get-StartupApprovalSnapshot($value) {
     if ($value.Exists -and $value.Kind -ne 'Binary') { throw 'Valor de control de inicio no binario.' }
@@ -215,6 +219,8 @@ function Sync-StartupTransaction($record, $actual) {
     $transaction.Pending = $null
 }
 function Write-StartupTransaction($backup, $record, $target, [string]$action) {
+    Assert-JunoLease
+    Assert-JunoStartupTarget $record
     $transaction = $record.Transaction
     $transaction.Pending = [pscustomobject]@{ Exists=[bool]$target.Exists; Data=$target.Data; Action=$action }
     Save-StartupBackup $backup
@@ -222,6 +228,9 @@ function Write-StartupTransaction($backup, $record, $target, [string]$action) {
     $actual = Get-StartupApprovalSnapshot (Read-StartupRegValue $record.ApprovalHive $record.ApprovalView $record.ApprovalKey $record.ApprovalValue)
     if (-not (Test-StartupApprovalSnapshot $actual $transaction.Confirmed)) {
         throw 'La configuracion de inicio cambio antes de escribir. Se conserva la operacion pendiente.'
+    }
+    if ((Get-StartupSourceFingerprint $record) -cne $record.Fingerprint) {
+        throw 'La entrada original de inicio cambio antes de escribir. Se conserva la operacion pendiente.'
     }
     $key = Open-StartupRegKey $record.ApprovalHive $record.ApprovalView $record.ApprovalKey $true ($action -eq 'Apply')
     if ($null -eq $key) { throw 'No se puede abrir el control de inicio de Windows.' }
@@ -243,6 +252,9 @@ function Write-StartupTransaction($backup, $record, $target, [string]$action) {
     Save-StartupBackup $backup
 }
 function Set-StartupState($entry, [bool]$enable) {
+    Assert-JunoLease
+    Assert-JunoStartupTarget $entry
+    if ($entry.ApprovalHive -eq 'LocalMachine') { Import-JunoMachineLegacy 'Startup' }
     if (-not $entry.Editable) { throw "No se puede modificar: $($entry.Name)." }
     $currentFingerprint = Get-StartupSourceFingerprint $entry
     if (-not $currentFingerprint) { throw "La entrada $($entry.Name) ya no existe." }
@@ -288,6 +300,8 @@ function Set-StartupState($entry, [bool]$enable) {
     return "$($entry.Name): $desiredState."
 }
 function Restore-StartupState {
+    Assert-JunoLease
+    if (Test-JunoAdmin) { Import-JunoMachineLegacy 'Startup' }
     $backup = Get-StartupBackup
     $entries = @($backup.Entries)
     if ($entries.Count -eq 0) { return 'No hay cambios de inicio guardados.' }
@@ -448,9 +462,9 @@ function Show-StartupManager([System.Windows.Forms.Form]$parent) {
         }
         & $script:StartupRefresh
         $report = "Cambios procesados: $count de $($selected.Count)."
-        if ($errors.Count -gt 0) { $report += "`n`nNo modificados:`n" + ($errors -join "`n") }
+        if ($errors.Count -gt 0) { $report += "`n`nSin confirmacion completa; revisar estado y respaldo:`n" + ($errors -join "`n") }
         [System.Windows.Forms.MessageBox]::Show($script:StartupDialog, $report, 'JUNO',
-            [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            [System.Windows.Forms.MessageBoxButtons]::OK, $(if($errors.Count -gt 0){[System.Windows.Forms.MessageBoxIcon]::Warning}else{[System.Windows.Forms.MessageBoxIcon]::Information})) | Out-Null
     }
     $btnRecommend.Add_Click({
         [void]$script:StartupGrid.EndEdit()

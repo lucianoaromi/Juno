@@ -27,26 +27,13 @@ function Get-BPPEnvironment {
     }
 }
 function Read-BPPBackup {
-    if (-not (Test-Path -LiteralPath $script:BPPBackupPath)) {
-        return [pscustomobject]@{ Owned=@(); MadeGlobal=$false }
-    }
-    $obj = Get-Content -LiteralPath $script:BPPBackupPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
-    if ($null -eq $obj -or -not ($obj.PSObject.Properties.Name -contains 'Owned')) { throw 'Respaldo de permisos no valido; no se modificaran directivas.' }
-    if (-not ($obj.PSObject.Properties.Name -contains 'MadeGlobal')) { throw 'Respaldo incompleto; no se modificaran directivas.' }
-    return $obj
+    $data=Read-JunoStore 'Policy' 'Machine' $null
+    if ($null -ne $data) { return $data }
+    $legacy=Get-JunoMachineLegacy 'Policy'
+    if ($null -ne $legacy) { return $legacy.Data }
+    return [pscustomobject]@{Owned=@();MadeGlobal=$false}
 }
-function Write-BPPBackup($backup) {
-    if (-not (Test-Path -LiteralPath $script:AppFolder)) {
-        New-Item -Path $script:AppFolder -ItemType Directory -Force | Out-Null
-    }
-    $tmp = "$($script:BPPBackupPath).tmp"
-    try {
-        $backup | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
-        Move-Item -LiteralPath $tmp -Destination $script:BPPBackupPath -Force -ErrorAction Stop
-    } finally {
-        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-    }
-}
+function Write-BPPBackup($backup) { Write-JunoStore 'Policy' $backup 'Machine' }
 function Get-BPPValues([Microsoft.Win32.RegistryKey]$key, [string]$name) {
     if ($null -eq $key -or -not ($key.GetValueNames() -contains $name)) { return ,([string[]]@()) }
     if ($key.GetValueKind($name) -ne [Microsoft.Win32.RegistryValueKind]::MultiString) {
@@ -56,20 +43,8 @@ function Get-BPPValues([Microsoft.Win32.RegistryKey]$key, [string]$name) {
     return ,([string[]]@($raw | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))
 }
 function Get-BPPPolicy {
-    $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($script:BPPPolicyPath, $false)
-    try {
-        $deny = Get-BPPValues $key $script:BPPDenyName
-        $allow = Get-BPPValues $key $script:BPPAllowName
-        $hasGlobal = ($null -ne $key -and ($key.GetValueNames() -contains $script:BPPGlobalName))
-        $global = $null
-        if ($hasGlobal) {
-            if ($key.GetValueKind($script:BPPGlobalName) -ne [Microsoft.Win32.RegistryValueKind]::DWord) {
-                throw 'Directiva general con tipo inesperado; no se modificara.'
-            }
-            $global = [int]$key.GetValue($script:BPPGlobalName)
-        }
-        return [pscustomobject]@{ Deny=@($deny); Allow=@($allow); HasGlobal=$hasGlobal; Global=$global }
-    } finally { if ($null -ne $key) { $key.Dispose() } }
+    $state=Get-JunoPolicyState
+    return [pscustomobject]@{Deny=@($state.Deny.Value | Where-Object {$null -ne $_});Allow=@($state.Allow.Value | Where-Object {$null -ne $_});HasGlobal=$state.Global.Exists;Global=$state.Global.Value}
 }
 function Get-BPPPackages {
     $list = New-Object 'System.Collections.Generic.List[object]'
@@ -104,72 +79,8 @@ function Confirm-BPPWrite {
     }
     return $state
 }
-function Disable-BPPApps([string[]]$families) {
-    if ($families.Count -eq 0) { return 'No hay aplicaciones seleccionadas.' }
-    $state = Confirm-BPPWrite
-    $own = Read-BPPBackup
-    $valid = @(Get-BPPPackages | ForEach-Object { $_.Family })
-    $toAdd = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($family in @($families | Select-Object -Unique)) {
-        if ($valid -notcontains $family) { throw "La aplicacion ya no esta instalada o es un componente protegido: $family" }
-        if ($state.Allow -contains $family) { throw "Existe una directiva de permiso previa para: $family. No se modificara." }
-        if ($state.Deny -contains $family) { continue }
-        $toAdd.Add($family)
-    }
-    if ($toAdd.Count -eq 0) { return 'Las aplicaciones elegidas ya estaban bloqueadas por otra directiva.' }
-    # Registrar propiedad ANTES de escribir, para poder recuperar cambios tras un cierre inesperado.
-    $oldOwned = @($own.Owned)
-    $own.Owned = @($oldOwned + $toAdd.ToArray() | Select-Object -Unique)
-    if (-not $state.HasGlobal) { $own.MadeGlobal = $true }
-    Write-BPPBackup $own
-    $key = [Microsoft.Win32.Registry]::LocalMachine.CreateSubKey($script:BPPPolicyPath)
-    if ($null -eq $key) { throw 'Windows no permitio abrir la directiva.' }
-    try {
-        if (-not $state.HasGlobal) {
-            $key.SetValue($script:BPPGlobalName, [int]0, [Microsoft.Win32.RegistryValueKind]::DWord)
-        }
-        [string[]]$combined = @($state.Deny + $toAdd.ToArray() | Select-Object -Unique)
-        $key.SetValue($script:BPPDenyName, $combined, [Microsoft.Win32.RegistryValueKind]::MultiString)
-    } finally { $key.Dispose() }
-    $after = Get-BPPPolicy
-    foreach ($family in $toAdd) {
-        if ($after.Deny -notcontains $family) { throw "No se pudo comprobar el bloqueo de $family." }
-    }
-    return "Bloqueo registrado para $($toAdd.Count) app(s). Se aplica a todas las cuentas del equipo. Reinicia las aplicaciones o cierra sesion para aplicar los permisos."
-}
-function Restore-BPPApps([string[]]$families) {
-    if ($families.Count -eq 0) { return 'No hay aplicaciones seleccionadas.' }
-    $state = Confirm-BPPWrite
-    $own = Read-BPPBackup
-    $toRemove = @($families | Where-Object { @($own.Owned) -contains $_ } | Select-Object -Unique)
-    if ($toRemove.Count -eq 0) { return 'No hay bloqueos de JUNO seleccionados.' }
-    $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($script:BPPPolicyPath, $true)
-    if ($null -eq $key) { throw 'No se pudo abrir la directiva para restaurar.' }
-    try {
-        [string[]]$remainingDeny = @($state.Deny | Where-Object { $toRemove -notcontains $_ })
-        if ($remainingDeny.Count -eq 0) {
-            if ($key.GetValueNames() -contains $script:BPPDenyName) { $key.DeleteValue($script:BPPDenyName, $false) }
-        } else {
-            $key.SetValue($script:BPPDenyName, $remainingDeny, [Microsoft.Win32.RegistryValueKind]::MultiString)
-        }
-        # Solo revertimos la directiva general si la creo esta aplicacion y
-        # no hay otra lista de permisos que necesite el valor 0.
-        $stillOwned = @($own.Owned | Where-Object { $toRemove -notcontains $_ })
-        if ($stillOwned.Count -eq 0 -and [bool]$own.MadeGlobal -and $remainingDeny.Count -eq 0 -and $state.Allow.Count -eq 0) {
-            if (($key.GetValueNames() -contains $script:BPPGlobalName) -and [int]$key.GetValue($script:BPPGlobalName) -eq 0) {
-                $key.DeleteValue($script:BPPGlobalName, $false)
-            }
-            $own.MadeGlobal = $false
-        }
-    } finally { $key.Dispose() }
-    $after = Get-BPPPolicy
-    foreach ($family in $toRemove) {
-        if ($after.Deny -contains $family) { throw "No se pudo verificar la restauracion de $family." }
-    }
-    $own.Owned = @($own.Owned | Where-Object { $toRemove -notcontains $_ })
-    Write-BPPBackup $own
-    return "Restauradas $($toRemove.Count) app(s). Se quitaron SOLO los bloqueos creados por JUNO."
-}
+function Disable-BPPApps([string[]]$families) { Invoke-JunoPolicy $families $false }
+function Restore-BPPApps([string[]]$families) { Invoke-JunoPolicy $families $true }
 function Show-BackgroundPermissions([System.Windows.Forms.Form]$parent) {
     $envInfo = Get-BPPEnvironment
     # En Pro/Enterprise/Education + administrador: usar directiva documentada.

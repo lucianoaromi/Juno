@@ -37,28 +37,9 @@ function Get-BPUState([string]$family) {
     } finally { $key.Dispose() }
 }
 function Get-BPUBackup {
-    $sid = Get-BPUAccount
-    if (-not (Test-Path -LiteralPath $script:BPUBackupPath)) {
-        return [pscustomobject]@{Version=1; Sid=$sid; Items=@()}
-    }
-    $obj = Get-Content -LiteralPath $script:BPUBackupPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
-    if ($null -eq $obj -or $obj.Version -ne 1 -or [string]$obj.Sid -ne $sid -or -not ($obj.PSObject.Properties.Name -contains 'Items')) {
-        throw 'El respaldo de permisos no pertenece a este usuario o esta dañado. No se modificara nada.'
-    }
-    return $obj
+    return (Read-JunoStore 'BPU' 'User' ([pscustomobject]@{Version=1;Sid=(Get-BPUAccount);Items=@()}))
 }
-function Save-BPUBackup($backup) {
-    if (-not (Test-Path -LiteralPath $script:AppFolder)) {
-        New-Item -Path $script:AppFolder -ItemType Directory -Force | Out-Null
-    }
-    $tmp = "$($script:BPUBackupPath).tmp"
-    try {
-        $backup | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $tmp -Encoding UTF8 -ErrorAction Stop
-        Move-Item -LiteralPath $tmp -Destination $script:BPUBackupPath -Force -ErrorAction Stop
-    } finally {
-        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
-    }
-}
+function Save-BPUBackup($backup) { Write-JunoStore 'BPU' $backup 'User' }
 function Test-BPULocalPolicy {
     $envInfo = Get-BPPEnvironment
     if ($envInfo.Domain) { throw 'Equipo gestionado o dominio desconocido: no se cambian permisos.' }
@@ -153,6 +134,7 @@ function Write-BPUTransactionValue($backup, $entry, [string]$name, $target) {
     Save-BPUBackup $backup
 }
 function Disable-BPUApps([string[]]$families) {
+    Assert-JunoLease
     if ($families.Count -eq 0) { return 'No hay aplicaciones seleccionadas.' }
     $null = Test-BPULocalPolicy
     $apps = @(Get-BPPPackages | ForEach-Object {$_.Family})
@@ -194,6 +176,7 @@ function Disable-BPUApps([string[]]$families) {
     return "Registro de usuario actualizado para $added app(s). Importante: Windows 11 puede ignorarlo; verifica en Ajustes si se muestra 'Nunca'."
 }
 function Restore-BPUApps([string[]]$families) {
+    Assert-JunoLease
     if ($families.Count -eq 0) { return 'No hay aplicaciones seleccionadas.' }
     $null = Test-BPULocalPolicy
     $backup = Get-BPUBackup

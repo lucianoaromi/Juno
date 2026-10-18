@@ -3,6 +3,10 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $recoveryRoot = Split-Path $PSScriptRoot -Parent
+. (Join-Path $recoveryRoot 'BackupStore.ps1')
+# Identidad ficticia y cuenta no elevada: no leer SID, ACL ni MachineGuid reales.
+function Get-JunoIdentity { [pscustomobject]@{Sid='TEST-SID';Machine='11111111-2222-3333-4444-555555555555'} }
+function Test-JunoAdmin { return $false }
 foreach ($spec in @(
     @{ File='Inicio.ps1'; Names=@('Get-StartupFlag','Get-StartupBackup','Save-StartupBackup','Get-StartupApprovalSnapshot','Test-StartupApprovalSnapshot','Initialize-StartupTransaction','Sync-StartupTransaction','Write-StartupTransaction','Set-StartupState','Restore-StartupState') },
     @{ File='PermisosUsuario.ps1'; Names=@('Get-BPUBackup','Save-BPUBackup','Test-BPUValueSnapshot','Initialize-BPUTransaction','Test-BPUApplyPending','Sync-BPUTransaction','Set-BPURegistryValue','Write-BPUTransactionValue','Disable-BPUApps','Restore-BPUApps') }
@@ -34,12 +38,12 @@ function Reset-RecoveryFake {
         StartupDisk=[pscustomobject]@{Entries=@()}
         Bpu=@{ Test_pkg=[pscustomobject]@{Available=$true;Disabled=(New-RecoveryValue $true 0);DisabledByUser=(New-RecoveryValue $true 0);IsOff=$false} }
         BpuDisk=[pscustomobject]@{Version=1;Sid='TEST-SID';Items=@()}
-        Writes=0; Saves=0; FaultWrites=@(); FaultSaves=@(); Fault='Before'; Fingerprint='source-unchanged'
+        Writes=0; Saves=0; FaultWrites=@(); FaultSaves=@(); Fault='Before'; Fingerprint='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
         History=@(); Targets=@(); ChangeBeforeWrite=$false
     }
     $global:JunoRecoveryEntry = [pscustomobject]@{
-        Editable=$true;Id='startup-id';Name='ExampleStartup';ApprovalHive='CurrentUser';ApprovalView='Default';ApprovalKey='TEST';ApprovalValue='ExampleStartup'
-        SourceType='Registro';SourceHive='CurrentUser';SourceView='Default';SourceKey='TEST-SOURCE';SourceValue='ExampleStartup'
+        Editable=$true;Id='CurrentUser|Default|Software\Microsoft\Windows\CurrentVersion\Run|ExampleStartup';Name='ExampleStartup';ApprovalHive='CurrentUser';ApprovalView='Default';ApprovalKey='Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';ApprovalValue='ExampleStartup'
+        SourceType='Registro';SourceHive='CurrentUser';SourceView='Default';SourceKey='Software\Microsoft\Windows\CurrentVersion\Run';SourceValue='ExampleStartup'
     }
 }
 function Save-RecoveryFake([string]$module, $backup) {
@@ -98,6 +102,7 @@ function ConvertTo-RecoveryLegacyBpu {
 
 Describe 'Inicio: recuperacion sin Registro real' {
     BeforeEach {
+        Enter-JunoLease ('Local\Juno.Tests.Recovery.'+[Guid]::NewGuid().ToString('N'))
         Reset-RecoveryFake
         Mock Get-StartupBackup { Copy-RecoveryObject $global:JunoRecoveryFake.StartupDisk }
         Mock Save-StartupBackup { param($backup) Save-RecoveryFake 'Startup' $backup }
@@ -108,6 +113,7 @@ Describe 'Inicio: recuperacion sin Registro real' {
         }
         Mock Open-StartupRegKey { New-RecoveryFakeKey 'Startup' }
     }
+    AfterEach { Exit-JunoLease }
     It 'A: confirma bytes exactos solo despues de leer la escritura' {
         Set-StartupState $global:JunoRecoveryEntry $false | Out-Null
         $record=$global:JunoRecoveryFake.StartupDisk.Entries[0]
@@ -247,6 +253,7 @@ Describe 'Inicio: recuperacion sin Registro real' {
 
 Describe 'Permisos de usuario: dos DWORD recuperables sin Registro real' {
     BeforeEach {
+        Enter-JunoLease ('Local\Juno.Tests.Recovery.'+[Guid]::NewGuid().ToString('N'))
         Reset-RecoveryFake
         Mock Test-BPULocalPolicy { [pscustomobject]@{} }
         Mock Get-BPPPackages { [pscustomobject]@{Family='Test_pkg'} }
@@ -261,6 +268,7 @@ Describe 'Permisos de usuario: dos DWORD recuperables sin Registro real' {
         }
         Mock Open-BPUWriteKey { param($family) if($family -ne 'Test_pkg'){throw 'TEST: familia inesperada'}; New-RecoveryFakeKey 'Bpu' }
     }
+    AfterEach { Exit-JunoLease }
     It 'A: confirma ambos DWORD individualmente y conserva originales' {
         Disable-BPUApps @('Test_pkg') | Out-Null
         $entry=$global:JunoRecoveryFake.BpuDisk.Items[0]
@@ -456,19 +464,25 @@ Describe 'Permisos de usuario: dos DWORD recuperables sin Registro real' {
 
 Describe 'Lectura y escritura real de JSON solo dentro de TestDrive' {
     BeforeEach {
-        $script:AppFolder=Join-Path $TestDrive 'backups'
+        Enter-JunoLease ('Local\Juno.Tests.Recovery.'+[Guid]::NewGuid().ToString('N'))
+        $script:AppFolder=Join-Path $TestDrive ([Guid]::NewGuid().ToString('N'))
         $script:StartupBackupPath=Join-Path $script:AppFolder 'inicio-backup.json'
         $script:BPUBackupPath=Join-Path $script:AppFolder 'background-user.json'
         Mock Get-BPUAccount { 'TEST-SID' }
+        Reset-RecoveryFake
     }
+    AfterEach { Exit-JunoLease }
     It 'reconoce archivos antiguos y conserva sus campos originales al agregar el diario' {
-        $startup=[pscustomobject]@{Entries=@([pscustomobject]@{OriginalExists=$false;OriginalData=$null;LastWrittenData=$null;Note='original'})}
+        $r=Copy-RecoveryObject $global:JunoRecoveryEntry
+        $r.PSObject.Properties.Remove('Editable')
+        foreach($p in @{Fingerprint=$global:JunoRecoveryFake.Fingerprint;OriginalExists=$false;OriginalData=$null;LastWrittenData=$null}.GetEnumerator()) { Add-Member -InputObject $r NoteProperty $p.Key $p.Value }
+        $startup=[pscustomobject]@{Entries=@($r)}
         Save-StartupBackup $startup
         $loaded=Get-StartupBackup
         Initialize-StartupTransaction $loaded.Entries[0]
         Save-StartupBackup $loaded
         $again=Get-StartupBackup
-        $again.Entries[0].Note | Should Be 'original'
+        $again.Entries[0].Name | Should Be 'ExampleStartup'
         $again.Entries[0].Transaction.Version | Should Be 1
         Test-Path -LiteralPath $script:StartupBackupPath | Should Be $true
         $bpu=[pscustomobject]@{Version=1;Sid='TEST-SID';Items=@([pscustomobject]@{Family='Test_pkg';Disabled=(New-RecoveryValue $false $null);DisabledByUser=(New-RecoveryValue $true 0)})}
@@ -483,7 +497,8 @@ Describe 'Lectura y escritura real de JSON solo dentro de TestDrive' {
         Test-Path -LiteralPath $script:BPUBackupPath | Should Be $true
     }
     It 'rechaza respaldo de otro usuario sin reemplazarlo' {
-        Save-BPUBackup ([pscustomobject]@{Version=1;Sid='OTHER-SID';Items=@()})
+        [void][IO.Directory]::CreateDirectory($script:AppFolder)
+        [IO.File]::WriteAllText($script:BPUBackupPath, '{"Version":1,"Sid":"OTHER-SID","Items":[]}',[Text.Encoding]::UTF8)
         $before=Get-Content -LiteralPath $script:BPUBackupPath -Raw
         { Get-BPUBackup } | Should Throw
         (Get-Content -LiteralPath $script:BPUBackupPath -Raw) | Should Be $before

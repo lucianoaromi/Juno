@@ -8,7 +8,7 @@ NOVEDADES
 * Icono en ventana principal y en las ventanas de cada herramienta.
 * Imagen en el encabezado de la ventana principal.
 * Creador opcional de acceso directo de escritorio con el icono de JUNO.
-* Mismo orden de modulos, misma logica y mismos respaldos de v0.7.4.
+* Mismo orden de modulos y compatibilidad con los respaldos historicos verificados.
 
 EJECUTAR
 1. Extrae TODO el ZIP en una carpeta propia.
@@ -17,10 +17,18 @@ EJECUTAR
 4. No muevas esa carpeta despues de crear el acceso directo (o tendras que recrearlo).
 
 RESPALDOS ANTERIORES
-IMPORTANTE: la ruta sigue siendo %LOCALAPPDATA%\WinRendimiento.
-Esto es intencional para mantener los respaldos de energia, efectos,
-transparencia, inicio, apps en segundo plano y TRIM. NO borres esa carpeta.
-Puedes seguir usando las opciones de restauracion ya existentes.
+Los respaldos del usuario siguen en %LOCALAPPDATA%\WinRendimiento.
+No borres esa carpeta: tambien conserva los respaldos historicos de equipo.
+Las operaciones nuevas de equipo (energia, inicio HKLM, directivas y TRIM)
+requieren administrador y guardan sus respaldos en %ProgramData%\JUNO-Backups,
+con propietario y permisos administrativos. Los historicos de equipo requieren
+revision e importacion explicita; el original se conserva sin sobrescribir.
+JUNO valida los formatos antes de restaurar. Un archivo invalido o de otro
+equipo/usuario se conserva y bloquea la operacion. Las copias previous/history
+no se aplican automaticamente: recuperar el archivo no restaura Windows.
+Solo se admite una instancia de JUNO abierta por equipo. Cierra la anterior
+antes de iniciar otra, incluso si cambias entre modo normal y administrador.
+Detalles de formatos, recuperacion y limites: docs\0.8.1-etapa3.md.
 
 MODULOS
 1. Plan de energia.

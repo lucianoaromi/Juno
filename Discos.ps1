@@ -158,7 +158,10 @@ function Update-DiskDetails {
     if ($null -eq $script:DiskDialog) { return }
     $item = Get-DiskSelectedVolume
     $script:DiskOptimizeButton.Enabled = ($null -ne $item -and $script:DiskIsAdmin -and $null -eq $script:DiskProcess)
-    $backupExists = Test-Path -LiteralPath $script:DiskTrimBackupPath
+    $backupExists = $false
+    if ($script:DiskIsAdmin) {
+        $backupExists = (Test-Path -LiteralPath $script:DiskTrimBackupPath) -or (Test-Path -LiteralPath (Get-JunoStorePath 'Trim' 'Machine'))
+    }
     $script:DiskRestoreTrimButton.Enabled = ($script:DiskIsAdmin -and $backupExists -and $null -eq $script:DiskProcess)
     $script:DiskEnableTrimButton.Enabled = ($null -ne $item -and $item.Media -eq 'SSD' -and
         $item.FileSystem -eq 'NTFS' -and $null -ne $script:DiskTrimStatus -and
@@ -215,58 +218,28 @@ function Refresh-DiskManager {
     $script:DiskStatus.Text = 'Diagnostico terminado. No se realizo ningun cambio.'
 }
 function Enable-DiskTrim {
-    $item = Get-DiskSelectedVolume
-    if (-not $script:DiskIsAdmin) { throw 'Ejecuta JUNO como administrador.' }
-    if (-not $item -or $item.Media -ne 'SSD' -or $item.FileSystem -ne 'NTFS') {
-        throw 'Selecciona un SSD NTFS identificado para habilitar esta operacion.'
-    }
-    $current = Get-DiskTrimState
-    if ($current.State -ne 1) { throw 'TRIM NTFS ya esta permitido o no se pudo verificar su estado.' }
-    $confirm = [System.Windows.Forms.MessageBox]::Show($script:DiskDialog,
-        'Esto habilita las notificaciones TRIM/UNMAP de NTFS para el SISTEMA, no solo para la unidad elegida. Solo conviene cambiarlo si sabes que tu SSD y controlador son compatibles. ¿Continuar?',
-        'Confirmar cambio global', 'YesNo', 'Warning')
+    Assert-JunoLease
+    $item=Get-DiskSelectedVolume
+    if (-not $item -or $item.Media -ne 'SSD' -or $item.FileSystem -ne 'NTFS') { throw 'Selecciona un SSD NTFS identificado para esta operacion.' }
+    if (-not (Test-JunoAdmin)) { throw 'Ejecuta JUNO como administrador.' }
+    $confirm=[System.Windows.Forms.MessageBox]::Show($script:DiskDialog,
+        'Esto permite notificaciones TRIM/UNMAP de NTFS para todo el sistema. Comprueba la compatibilidad del SSD y controlador. ¿Continuar?',
+        'Confirmar cambio global','YesNo','Warning','Button2')
     if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-    if (-not (Test-Path -LiteralPath $script:AppFolder)) {
-        New-Item -ItemType Directory -Path $script:AppFolder -Force | Out-Null
-    }
-    if (-not (Test-Path -LiteralPath $script:DiskTrimBackupPath)) {
-        # Solo recordar estado comprobado (1), antes de escribir en Windows.
-        $record = [pscustomobject]@{ Original=1; Date=(Get-Date).ToString('o'); Action='NTFS DisableDeleteNotify' }
-        $temp = "$($script:DiskTrimBackupPath).tmp"
-        $record | ConvertTo-Json | Set-Content -LiteralPath $temp -Encoding UTF8
-        Move-Item -LiteralPath $temp -Destination $script:DiskTrimBackupPath -Force
-    }
-    $fsutil = Join-Path $env:WINDIR 'System32\fsutil.exe'
-    $response = (& $fsutil behavior set DisableDeleteNotify 0 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) { throw "Windows no acepto la activacion: $response" }
-    $after = Get-DiskTrimState
-    if ($after.State -ne 0) { throw 'No se pudo comprobar la activacion. Revisa fsutil.' }
-    [System.Windows.Forms.MessageBox]::Show($script:DiskDialog,
-        'TRIM NTFS permitido y verificado. Esto no demuestra que el dispositivo fisico admita TRIM.',
-        'JUNO', 'OK', 'Information') | Out-Null
+    $message=Invoke-JunoTrim $false
     Refresh-DiskManager
+    [void][System.Windows.Forms.MessageBox]::Show($script:DiskDialog,$message,'JUNO','OK','Information')
 }
 function Restore-DiskTrim {
-    if (-not (Test-Path -LiteralPath $script:DiskTrimBackupPath)) { throw 'No existe copia anterior de TRIM.' }
-    if (-not $script:DiskIsAdmin) { throw 'Ejecuta como administrador para revertir TRIM.' }
-    $original = Get-Content -LiteralPath $script:DiskTrimBackupPath -Encoding UTF8 -Raw | ConvertFrom-Json
-    if ([int]$original.Original -ne 1 -or $original.Action -ne 'NTFS DisableDeleteNotify') {
-        throw 'Copia de TRIM incompatible. No se aplicaron cambios.'
-    }
-    $now = Get-DiskTrimState
-    if ($now.State -ne 0) { throw 'TRIM ya fue cambiado por otra herramienta o su estado es desconocido. Se conserva la copia.' }
-    $confirm = [System.Windows.Forms.MessageBox]::Show($script:DiskDialog,
-        '¿Restaurar el valor anterior de TRIM? Lo deja DESHABILITADO en NTFS para el sistema completo. Podria afectar el rendimiento del SSD.',
-        'Revertir TRIM del sistema', 'YesNo', 'Warning')
+    Assert-JunoLease
+    if (-not (Test-JunoAdmin)) { throw 'Ejecuta JUNO como administrador.' }
+    $confirm=[System.Windows.Forms.MessageBox]::Show($script:DiskDialog,
+        '¿Restaurar el valor anterior? Puede deshabilitar TRIM NTFS para todo el sistema. Se comprobara el respaldo antes de aplicar cambios.',
+        'Revertir TRIM del sistema','YesNo','Warning','Button2')
     if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-    $fsutil = Join-Path $env:WINDIR 'System32\fsutil.exe'
-    $response = (& $fsutil behavior set DisableDeleteNotify 1 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) { throw "No se restauro TRIM: $response" }
-    if ((Get-DiskTrimState).State -ne 1) { throw 'No se pudo verificar la restauracion. Se conserva la copia.' }
-    Remove-Item -LiteralPath $script:DiskTrimBackupPath -ErrorAction Stop
+    $message=Invoke-JunoTrim $true
     Refresh-DiskManager
-    [System.Windows.Forms.MessageBox]::Show($script:DiskDialog,
-        'Se restauro el estado anterior de TRIM NTFS.', 'JUNO', 'OK', 'Information') | Out-Null
+    [void][System.Windows.Forms.MessageBox]::Show($script:DiskDialog,$message,'JUNO','OK','Information')
 }
 function Start-DiskOptimize {
     $item = Get-DiskSelectedVolume
