@@ -130,7 +130,7 @@ function Show-BackgroundManager([System.Windows.Forms.Form]$parent) {
     $dialog.Font = New-Object System.Drawing.Font('Segoe UI', 10)
     $script:BgDialog = $dialog
 
-    $dialog.Controls.Add((New-Label '7. Procesos y aplicaciones en segundo plano' 20 12 968 32 18 $true $white))
+    $dialog.Controls.Add((New-Label '5. Procesos y aplicaciones en segundo plano' 20 12 968 32 18 $true $white))
     $dialog.Controls.Add((New-Label 'Mide RAM y CPU. Cerrar un proceso no cambia permisos; la aplicacion puede reiniciarse.' 22 48 964 23 10 $false $muted))
     $dialog.Controls.Add((New-Label 'Una app sin ventana no necesariamente esta consumiendo recursos en segundo plano.' 22 72 964 23 9 $false $muted))
 
@@ -189,6 +189,7 @@ function Show-BackgroundManager([System.Windows.Forms.Form]$parent) {
     foreach ($button in @($btnRefresh,$btnCloseSafe,$btnForce,$btnSettings,$btnStartup,$btnTaskManager,$btnExit)) {
         $dialog.Controls.Add($button)
     }
+    $btnCloseSafe.Enabled=$false;$btnForce.Enabled=$false
 
     # Los controles se guardan en script como los demas modulos WinForms.
     $script:BgRefresh = {
@@ -216,10 +217,13 @@ function Show-BackgroundManager([System.Windows.Forms.Form]$parent) {
     }
 
     $script:BgGrid.Add_SelectionChanged({
+        $btnCloseSafe.Enabled=$false;$btnForce.Enabled=$false
         if ($script:BgGrid.SelectedRows.Count -eq 1) {
             $entry = $script:BgGrid.SelectedRows[0].Tag
             if ($null -ne $entry) {
                 $script:BgDetail.Text = "PID $($entry.Pid) | Ruta: $($entry.Path)"
+                $btnCloseSafe.Enabled=[bool]$entry.HasWindow
+                $btnForce.Enabled=([bool]$entry.Optional -and $script:BgOptionalNames -contains ([string]$entry.Name).ToLowerInvariant())
             }
         }
     })
@@ -325,9 +329,10 @@ function Show-BackgroundManager([System.Windows.Forms.Form]$parent) {
                 "No se pudo abrir el administrador de inicio: $($_.Exception.Message)", 'JUNO') | Out-Null
         }
     })
-    $btnTaskManager.Add_Click({ Start-Process 'taskmgr.exe' })
+    $btnTaskManager.Add_Click({try {Start-Process (Get-JunoSystemTool 'taskmgr.exe')}catch {$script:BgStatus.Text=$_.Exception.Message}})
     $btnExit.Add_Click({ $script:BgDialog.Close() })
 
+    Initialize-JunoWindow $dialog $parent
     try {
         & $script:BgRefresh
         [void]$dialog.ShowDialog($parent)

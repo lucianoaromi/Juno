@@ -11,8 +11,8 @@ $script:StartupRegView = if ([Environment]::Is64BitOperatingSystem) { 'Registry6
 $script:StartupIsAdmin = $false
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    $script:StartupIsAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    try {$principal = New-Object Security.Principal.WindowsPrincipal($identity);$script:StartupIsAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}
+    finally {$identity.Dispose()}
 } catch { $script:StartupIsAdmin = $false }
 
 function Open-StartupRegKey([string]$hive, [string]$view, [string]$path, [bool]$write, [bool]$create) {
@@ -394,7 +394,7 @@ function Show-StartupManager([System.Windows.Forms.Form]$parent) {
     $dialog.Controls.Add($grid)
     $script:StartupGrid = $grid
 
-    $lblStatus = New-Label 'Leyendo programas de inicio...' 22 422 963 37 10 $false $muted
+    $lblStatus = New-Label 'Leyendo programas de inicio...' 22 422 963 28 10 $false $muted
     $dialog.Controls.Add($lblStatus)
     $script:StartupStatus = $lblStatus
     $adminNote = if ($script:StartupIsAdmin) { 'Privilegios de administrador: sí.' } else { 'Sin administrador: entradas del equipo solo lectura; podés gestionarlas desde el Administrador de tareas.' }
@@ -492,13 +492,14 @@ function Show-StartupManager([System.Windows.Forms.Form]$parent) {
             [System.Windows.Forms.MessageBox]::Show($script:StartupDialog, $_.Exception.Message, 'Error al restaurar') | Out-Null
         }
     })
-    $btnRefresh.Add_Click({ & $script:StartupRefresh })
-    $btnTaskmgr.Add_Click({ Start-Process 'taskmgr.exe' })
+    $btnRefresh.Add_Click({try {& $script:StartupRefresh}catch {$script:StartupStatus.Text='Error de lectura; lista incompleta: '+$_.Exception.Message}})
+    $btnTaskmgr.Add_Click({try {Start-Process (Get-JunoSystemTool 'taskmgr.exe')}catch {$script:StartupStatus.Text=$_.Exception.Message}})
     $btnSettings.Add_Click({
         try { Start-Process 'ms-settings:startupapps' }
         catch { [System.Windows.Forms.MessageBox]::Show($script:StartupDialog, 'No se pudo abrir Configuracion de inicio.') | Out-Null }
     })
     $btnClose.Add_Click({ $script:StartupDialog.Close() })
+    Initialize-JunoWindow $dialog $parent
     try {
         & $script:StartupRefresh
         [void]$dialog.ShowDialog($parent)

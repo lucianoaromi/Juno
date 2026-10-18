@@ -24,8 +24,8 @@ function Format-CleanBytes([long]$bytes) {
 }
 function Test-CleanupIsAdmin {
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal=New-Object Security.Principal.WindowsPrincipal($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    try {$principal=New-Object Security.Principal.WindowsPrincipal($identity);return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}
+    finally {$identity.Dispose()}
 }
 function Get-CleanupSpecs {
     $local=[Environment]::GetFolderPath('LocalApplicationData')
@@ -143,6 +143,51 @@ function Scan-CleanFolder([string]$category,[int]$limit=5000) {
     $result.Note="Solo diagnostico, sin recursion | omitidos: $($result.Skipped), fallidos: $($result.Failed)"
     if ($result.Truncated) { $result.Note='PARCIAL: limite de entradas alcanzado. '+$result.Note }
     return $result
+}
+function Get-CleanupScanBatch($specs) {
+    foreach($spec in $specs){
+        try {$scan=if($spec.Root){Scan-CleanFolder $spec.Id}else{Get-RecycleBinEstimate}}
+        catch {$scan=[pscustomobject]@{Id=$spec.Id;Available=$false;Files=@();Records=@();Count=0;Bytes=0L;Failed=1;Skipped=0;CanDelete=$false;Note='Consulta no disponible: '+$_.Exception.Message}}
+        [pscustomobject]@{Id=$spec.Id;Name=$spec.Name;Scan=$scan}
+    }
+}
+function Start-CleanupScan {
+    # Copiar solo funciones de lectura, nunca controles, escritores ni concesion del mutex.
+    $definitions=foreach($name in @('Get-CleanupSpec','Get-CleanErrorReason','Get-CleanAttributes','Get-CleanPathStatus','Open-CleanProbe','Get-CleanCandidateStatus','Scan-CleanFolder','Get-RecycleBinEstimate','Get-CleanupScanBatch')){
+        'function '+$name+' {'+(Get-Command $name -CommandType Function -ErrorAction Stop).ScriptBlock.ToString()+'}'
+    }
+    $source="param(`$specs)`n`$ErrorActionPreference='Stop'`n`$script:CleanupScanSpecs=`$specs`nfunction Get-CleanupSpecs {return `$script:CleanupScanSpecs}`n"+($definitions -join "`n")+"`nGet-CleanupScanBatch `$specs"
+    $runspace=[RunspaceFactory]::CreateRunspace();$pipe=[PowerShell]::Create()
+    try {
+        $runspace.ApartmentState='STA';$runspace.ThreadOptions='ReuseThread';$runspace.Open();$pipe.Runspace=$runspace
+        $specs=@(Get-CleanupSpecs|ForEach-Object{[pscustomobject]@{Id=$_.Id;Name=$_.Name;Root=$_.Root;Days=$_.Days;Pattern=$_.Pattern;Action=$_.Action}})
+        [void]$pipe.AddScript($source).AddArgument($specs)
+        return [pscustomobject]@{Pipe=$pipe;Runspace=$runspace;Handle=$pipe.BeginInvoke();Stopping=$null;CancelRequested=$false;Disposed=$false}
+    }catch{$pipe.Dispose();$runspace.Dispose();throw}
+}
+function Test-CleanupScanComplete($operation) {
+    return ($operation.Handle.IsCompleted -and ($null -eq $operation.Stopping -or $operation.Stopping.IsCompleted))
+}
+function Stop-CleanupScan($operation) {
+    if($operation.Disposed){return}
+    $operation.CancelRequested=$true
+    if(-not $operation.Handle.IsCompleted -and $null -eq $operation.Stopping){
+        try {$operation.Stopping=$operation.Pipe.BeginStop($null,$null)}
+        catch {if(-not $operation.Handle.IsCompleted){throw}}
+    }
+}
+function Receive-CleanupScan($operation) {
+    if($operation.Disposed -or -not(Test-CleanupScanComplete $operation)){throw 'El analisis todavia no termino o ya fue recogido.'}
+    try {
+        if($null -ne $operation.Stopping){$operation.Pipe.EndStop($operation.Stopping)}
+        $items=@($operation.Pipe.EndInvoke($operation.Handle))
+        if($operation.CancelRequested){return [pscustomobject]@{Status='Cancelled';Items=@();Message='Analisis cancelado. No se borro nada.'}}
+        if($operation.Pipe.HadErrors){throw ($operation.Pipe.Streams.Error|Out-String)}
+        return [pscustomobject]@{Status='Completed';Items=$items;Message=''}
+    }catch{
+        if($operation.CancelRequested){return [pscustomobject]@{Status='Cancelled';Items=@();Message='Analisis cancelado. No se borro nada.'}}
+        return [pscustomobject]@{Status='Error';Items=@();Message=('Analisis incompleto: '+$_.Exception.Message)}
+    }finally{$operation.Pipe.Dispose();$operation.Runspace.Dispose();$operation.Disposed=$true}
 }
 function Get-RecycleBinEstimate {
     if ([IntPtr]::Size -eq 4) {
@@ -268,6 +313,7 @@ function Show-CleanupDetails([System.Windows.Forms.Form]$parent,$result) {
     $text.Text='Solo diagnostico; ninguna ruta autoriza un borrado.'+$nl+$result.Note+$nl+$nl+
         (($result.Records | ForEach-Object { "$($_.Status) | $($_.Reason) | $($_.Path)" }) -join $nl)
     $view.Controls.Add($text)
+    Initialize-JunoWindow $view $parent
     try { [void]$view.ShowDialog($parent) } finally { $view.Dispose() }
 }
 
@@ -338,31 +384,35 @@ function Show-CleanupManager([System.Windows.Forms.Form]$parent) {
     $dialog.Controls.Add($statusClean)
     $dialog.Controls.Add((New-Label 'Los borrados que confirmes en Windows pueden ser irreversibles. JUNO no puede deshacerlos.' 24 480 795 40 10 $false $muted))
 
-    $ctx=[pscustomobject]@{Results=@{};Busy=$false;LastReport=$null}
+    $ctx=[pscustomobject]@{Results=@{};Busy=$false;LastReport=$null;Scan=$null;CloseRequested=$false}
     $btnClean.Enabled=$false; $btnRecommended.Enabled=$false
-    $btnAnalyze.Add_Click({
-        if($ctx.Busy){return}
-        $ctx.Busy=$true; $ctx.LastReport=$null
-        $btnAnalyze.Enabled=$false; $btnClean.Enabled=$false; $btnRecommended.Enabled=$false
-        $dialog.UseWaitCursor=$true; $grid.Rows.Clear(); $ctx.Results=@{}
+    $scanTimer=New-Object Windows.Forms.Timer;$scanTimer.Interval=100
+    $receiveScan={
+        if($null -eq $ctx.Scan -or -not(Test-CleanupScanComplete $ctx.Scan)){return}
+        $scanTimer.Stop()
         try {
-            foreach($spec in Get-CleanupSpecs) {
-                if($spec.Root){$scan=Scan-CleanFolder $spec.Id}
-                else {
-                    try {$scan=Get-RecycleBinEstimate}
-                    catch {$scan=[pscustomobject]@{Id=$spec.Id;Available=$false;Files=@();Records=@();Count=0;Bytes=0L;Failed=1;Skipped=0;CanDelete=$false;Note='Consulta no disponible; revisar contenido actual en Windows'}}
-                }
-                $ctx.Results[$spec.Id]=$scan
+            $result=Receive-CleanupScan $ctx.Scan
+            if($result.Status -ne 'Completed'){$statusClean.Text=$result.Message;return}
+            foreach($item in $result.Items){
+                $scan=$item.Scan;$ctx.Results[$item.Id]=$scan
                 $count=if($scan.Available){[string]$scan.Count}else{'Sin datos'}
                 $size=if($scan.Available){Format-CleanBytes $scan.Bytes}else{'Sin datos'}
-                $index=$grid.Rows.Add($false,$spec.Name,$count,$size,$scan.Note); $grid.Rows[$index].Tag=$spec.Id
+                $index=$grid.Rows.Add($false,$item.Name,$count,$size,$scan.Note);$grid.Rows[$index].Tag=$item.Id
             }
             $failures=($ctx.Results.Values | Measure-Object -Property Failed -Sum).Sum
             $statusClean.Text="Analisis finalizado: $failures fallos. Ver archivos / motivos; selecciona categorias."
             if(Test-CleanupIsAdmin){$statusClean.Text='Modo elevado: solo consulta. Reabre JUNO sin administrador para continuar.'}
             $btnRecommended.Enabled=$true; $btnClean.Enabled=-not (Test-CleanupIsAdmin)
         } catch {$statusClean.Text='Analisis incompleto. No se borro nada. '+$_.Exception.Message}
-        finally {$ctx.Busy=$false; $btnAnalyze.Enabled=$true; $dialog.UseWaitCursor=$false}
+        finally {$ctx.Scan=$null;$ctx.Busy=$false;$grid.Enabled=$true;$btnAnalyze.Text='Analizar';$dialog.UseWaitCursor=$false;if($ctx.CloseRequested){$dialog.Close()}}
+    }
+    $scanTimer.Add_Tick({& $receiveScan})
+    $btnAnalyze.Add_Click({
+        if($ctx.Busy){if($null -ne $ctx.Scan){Stop-CleanupScan $ctx.Scan;$statusClean.Text='Cancelando analisis; esperando que termine la consulta actual...'};return}
+        $ctx.Busy=$true;$ctx.LastReport=$null;$btnClean.Enabled=$false;$btnRecommended.Enabled=$false
+        $grid.Rows.Clear();$grid.Enabled=$false;$ctx.Results=@{};$btnAnalyze.Text='Cancelar analisis';$statusClean.Text='Analizando sin modificar archivos. Puedes cancelar.'
+        try {$ctx.Scan=Start-CleanupScan;$scanTimer.Start();& $receiveScan}
+        catch {$ctx.Busy=$false;$grid.Enabled=$true;$btnAnalyze.Text='Analizar';$statusClean.Text='No se pudo iniciar el analisis: '+$_.Exception.Message}
     })
     $btnRecommended.Add_Click({
         if($grid.SelectedRows.Count -eq 1) {
@@ -397,7 +447,14 @@ function Show-CleanupManager([System.Windows.Forms.Form]$parent) {
         } catch {$statusClean.Text='Operacion incompleta: '+$_.Exception.Message+' JUNO no borro archivos.'}
         finally {$ctx.Busy=$false}
     })
-    $btnClose.Add_Click({if(-not $ctx.Busy){$dialog.Close()}})
-    $dialog.Add_FormClosing({param($sender,$e) if($ctx.Busy){$e.Cancel=$true}})
-    try {[void]$dialog.ShowDialog($parent)} finally {$dialog.Dispose()}
+    $btnClose.Add_Click({$dialog.Close()})
+    $dialog.Add_FormClosing({param($sender,$e)
+        if($ctx.Busy){$e.Cancel=$true;if($null -ne $ctx.Scan){$ctx.CloseRequested=$true;Stop-CleanupScan $ctx.Scan;$statusClean.Text='Cancelando analisis antes de cerrar...'}}
+    })
+    Initialize-JunoWindow $dialog $parent
+    try {[void]$dialog.ShowDialog($parent)} finally {
+        $scanTimer.Stop();$scanTimer.Dispose()
+        if($null -ne $ctx.Scan -and -not $ctx.Scan.Disposed){Stop-CleanupScan $ctx.Scan;$ctx.Scan.Pipe.Dispose();$ctx.Scan.Runspace.Dispose()}
+        $dialog.Dispose()
+    }
 }

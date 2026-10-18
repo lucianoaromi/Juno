@@ -3,6 +3,7 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $cleanupTestSource=Join-Path (Split-Path $PSScriptRoot -Parent) 'Limpieza.ps1'
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'UiSupport.ps1')
 $cleanupTokens=$null; $cleanupErrors=$null
 $cleanupAst=[System.Management.Automation.Language.Parser]::ParseFile($cleanupTestSource,[ref]$cleanupTokens,[ref]$cleanupErrors)
 if($cleanupErrors.Count){throw ($cleanupErrors.Message -join '; ')}
@@ -320,7 +321,7 @@ foreach($name in @('New-Label','New-Button')) {
     . ([scriptblock]::Create($node.Extent.Text))
 }
 $showNode=$cleanupAst.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Show-CleanupManager'},$true)
-$showText=$showNode.Extent.Text.Replace('try {[void]$dialog.ShowDialog($parent)} finally {$dialog.Dispose()}','try {Invoke-CleanupTestUi $dialog} finally {$dialog.Dispose()}')
+$showText=$showNode.Extent.Text.Replace('[void]$dialog.ShowDialog($parent)','Invoke-CleanupTestUi $dialog')
 $showText=[regex]::Replace($showText,'(?m)^\s*\[void\]\[Windows.Forms.MessageBox\]::Show\([^\r\n]*\)\s*$','Show-CleanupTestMessage $message')
 if($showText -eq $showNode.Extent.Text -or $showText -match '\$dialog\.ShowDialog|\[Windows.Forms.MessageBox\]::Show'){throw 'TEST: no se sustituyeron las ventanas modales'}
 . ([scriptblock]::Create($showText))
@@ -342,6 +343,10 @@ Describe 'Eventos WinForms sin ventanas ni procesos reales' {
         Mock Get-CleanupSpecs {Get-CleanupTestSpecs}
         Mock Test-CleanupIsAdmin {$false}
         Mock Confirm-CleanupSelection {$false}
+        # El comportamiento de tareas reales se comprueba en Regression.Tests.ps1.
+        Mock Start-CleanupScan {[pscustomobject]@{Items=@(Get-CleanupScanBatch (Get-CleanupTestSpecs));Disposed=$false}}
+        Mock Test-CleanupScanComplete {$true}
+        Mock Receive-CleanupScan {param($operation) [pscustomobject]@{Status='Completed';Items=$operation.Items;Message=''}}
         Mock Get-RecycleBinEstimate {[pscustomobject]@{Id='Papelera';Available=$true;Files=@();Records=@();Count=2;Bytes=40L;Failed=0;Skipped=0;Note='Instantanea';CanDelete=$false}}
         Mock Invoke-CleanupSelection {[pscustomobject]@{Status='Delegated';Opened=1;Failed=0;Skipped=0;Records=@();LogPath=$null;LogError=$false}}
         Mock Start-Process {throw 'TEST: proceso real prohibido'}

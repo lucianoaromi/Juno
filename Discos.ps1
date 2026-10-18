@@ -24,8 +24,8 @@ $script:DiskIsAdmin = $false
 function Test-DiskIsAdmin {
     try {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        try {$principal = New-Object Security.Principal.WindowsPrincipal($identity);return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}
+        finally {$identity.Dispose()}
     } catch { return $false }
 }
 function Format-DiskBytes([double]$bytes) {
@@ -120,8 +120,8 @@ function Get-DiskVolumes {
 }
 function Get-DiskTrimState {
     # Configuracion GLOBAL de Windows: NO indica que el SSD soporte fisicamente TRIM.
-    $fsutil = Join-Path $env:WINDIR 'System32\fsutil.exe'
     try {
+        $fsutil = Get-JunoSystemTool 'fsutil.exe'
         $output = (& $fsutil behavior query DisableDeleteNotify 2>&1 | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'No se pudo consultar fsutil.' }
         $m = [regex]::Match($output, '(?im)^\s*NTFS\s+DisableDeleteNotify\s*=\s*([01])\b')
@@ -157,7 +157,7 @@ function Get-DiskSelectedVolume {
 function Update-DiskDetails {
     if ($null -eq $script:DiskDialog) { return }
     $item = Get-DiskSelectedVolume
-    $script:DiskOptimizeButton.Enabled = ($null -ne $item -and $script:DiskIsAdmin -and $null -eq $script:DiskProcess)
+    $script:DiskOptimizeButton.Enabled = ($null -ne $item -and $item.Health -in @('Healthy','Sin datos') -and $script:DiskIsAdmin -and $null -eq $script:DiskProcess)
     $backupExists = $false
     if ($script:DiskIsAdmin) {
         $backupExists = (Test-Path -LiteralPath $script:DiskTrimBackupPath) -or (Test-Path -LiteralPath (Get-JunoStorePath 'Trim' 'Machine'))
@@ -251,6 +251,7 @@ function Start-DiskOptimize {
     if ($item.Health -notin @('Healthy', 'Sin datos')) {
         throw 'Windows informa un estado de salud no saludable. Hace falta diagnosticarlo y respaldar datos antes de optimizar.'
     }
+    $exe = Get-JunoSystemTool 'defrag.exe'
     $confirm = [System.Windows.Forms.MessageBox]::Show($script:DiskDialog,
         "¿Optimizar $($item.Letter):? Windows elegira automaticamente la operacion adecuada para el medio mediante defrag /O. Puede tardar y consumir recursos. No es necesario hacerlo si el mantenimiento programado funciona.",
         'Confirmar mantenimiento manual', 'YesNo', 'Question')
@@ -260,7 +261,6 @@ function Start-DiskOptimize {
     $id = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')
     $script:DiskLog = Join-Path $dir "defrag-$($item.Letter)-$id.txt"
     $script:DiskErrLog = Join-Path $dir "defrag-$($item.Letter)-$id-error.txt"
-    $exe = Join-Path $env:WINDIR 'System32\defrag.exe'
     # Start-Process -PassThru puede perder el codigo de salida en PowerShell 5.1.
     # Mantener un objeto .NET Process propio garantiza acceso a ExitCode al terminar.
     # Leer AMBOS flujos en paralelo evita el bloqueo cuando defrag escribe mucha salida.
@@ -419,7 +419,7 @@ function Show-DiskManager([System.Windows.Forms.Form]$parent) {
     $green = [System.Drawing.Color]::FromArgb(38,135,96)
     $gray = [System.Drawing.Color]::FromArgb(67,76,91)
 
-    $dlg.Controls.Add((New-Label '6. Almacenamiento SSD / HDD' 22 14 725 32 17 $true $white))
+    $dlg.Controls.Add((New-Label '7. Almacenamiento SSD / HDD' 22 14 725 32 17 $true $white))
     $dlg.Controls.Add((New-Label 'Diagnostico primero. No optimiza unidades, ni modifica TRIM, sin tu confirmacion.' 22 48 740 27 10 $false $muted))
     $panel = New-Panel 20 79 754 466
     $dlg.Controls.Add($panel)
@@ -508,7 +508,7 @@ function Show-DiskManager([System.Windows.Forms.Form]$parent) {
         catch { [System.Windows.Forms.MessageBox]::Show($script:DiskDialog, "No se inicio: $($_.Exception.Message)", 'JUNO', 'OK', 'Warning') | Out-Null }
     })
     $btnOfficial.Add_Click({
-        try { Start-Process (Join-Path $env:WINDIR 'System32\dfrgui.exe') }
+        try { Start-Process (Get-JunoSystemTool 'dfrgui.exe') }
         catch { [System.Windows.Forms.MessageBox]::Show($script:DiskDialog, $_.Exception.Message, 'JUNO') | Out-Null }
     })
     $btnEnableTrim.Add_Click({
@@ -527,6 +527,7 @@ function Show-DiskManager([System.Windows.Forms.Form]$parent) {
             [System.Windows.Forms.MessageBox]::Show($script:DiskDialog, 'Espera a que termine la optimizacion antes de cerrar esta ventana.', 'JUNO') | Out-Null
         }
     })
+    Initialize-JunoWindow $dlg $parent
     try {
         Refresh-DiskManager
         if (-not $script:DiskIsAdmin) {

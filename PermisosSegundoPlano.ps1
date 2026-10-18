@@ -48,7 +48,7 @@ function Show-BackgroundPermissions([System.Windows.Forms.Form]$parent) {
     $dialog.Text='JUNO v0.8 | Permisos en segundo plano';$dialog.StartPosition='CenterParent'
     $dialog.ClientSize=New-Object Drawing.Size(990,695);$dialog.FormBorderStyle='FixedSingle';$dialog.MaximizeBox=$false
     $dialog.BackColor=[Drawing.Color]::FromArgb(22,26,34);$dialog.ForeColor=[Drawing.Color]::White;$dialog.Font=New-Object Drawing.Font('Segoe UI',10)
-    $dialog.Controls.Add((New-Label '7. Permisos de aplicaciones en segundo plano' 20 12 950 32 18 $true $white))
+    $dialog.Controls.Add((New-Label '5. Permisos de aplicaciones en segundo plano' 20 12 950 32 18 $true $white))
     $dialog.Controls.Add((New-Label 'Directiva de equipo: edicion compatible y administrador. HKCU: solo restauracion de respaldos.' 22 51 948 24 10 $false $muted))
     $dialog.Controls.Add((New-Label 'Una escritura del Registro no demuestra restriccion efectiva. Aplicaciones de escritorio: gestion manual.' 22 77 946 24 9 $false $muted))
     $grid=New-Object Windows.Forms.DataGridView
@@ -65,7 +65,7 @@ function Show-BackgroundPermissions([System.Windows.Forms.Form]$parent) {
         $column=New-Object Windows.Forms.DataGridViewTextBoxColumn;$column.HeaderText=$info[0];$column.Width=$info[1];$column.ReadOnly=$true;$column.SortMode='NotSortable';[void]$grid.Columns.Add($column)
     }
     $dialog.Controls.Add($grid)
-    $status=New-Label 'Consultando inventario y respaldos; no se aplicaran cambios.' 22 473 944 56 9 $false $muted;$dialog.Controls.Add($status)
+    $status=New-Label 'Consultando inventario y respaldos; no se aplicaran cambios.' 22 473 944 50 9 $false $muted;$dialog.Controls.Add($status)
     $dialog.Controls.Add((New-Label 'Las entradas pendientes se conservan aunque la app no figure instalada. Eficacia: no verificada.' 22 526 944 24 9 $false $muted))
     $refresh=New-Button 'Actualizar lista' 20 562 295 36 $gray
     $request=New-Button 'Solicitar restriccion' 329 562 316 36 $blue
@@ -118,5 +118,6 @@ function Show-BackgroundPermissions([System.Windows.Forms.Form]$parent) {
     $request.Add_Click({& $act 'Request'});$restore.Add_Click({& $act 'Restore'})
     $settings.Add_Click({try{$family='';if($grid.SelectedRows.Count -eq 1){$family=$grid.SelectedRows[0].Tag.Family};Open-BPPSettings $family}catch{$status.Text='No se pudo abrir Ajustes: '+$_.Exception.Message}})
     $close.Add_Click({$dialog.Close()})
+    Initialize-JunoWindow $dialog $parent
     try{& $reload;[void]$dialog.ShowDialog($parent)}finally{$dialog.Dispose()}
 }

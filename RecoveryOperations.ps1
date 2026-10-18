@@ -308,7 +308,7 @@ function Invoke-JunoPolicy([string[]]$families,[bool]$restore) {
 
 function Invoke-JunoTrimValue([int]$value) {
     Assert-JunoInt $value 0 1
-    $result=(& (Join-Path $env:WINDIR 'System32\fsutil.exe') behavior set DisableDeleteNotify NTFS $value 2>&1|Out-String)
+    $result=(& (Get-JunoSystemTool 'fsutil.exe') behavior set DisableDeleteNotify NTFS $value 2>&1|Out-String)
     if($LASTEXITCODE -ne 0){throw "Windows no acepto el cambio de TRIM NTFS: $result"}
 }
 function Invoke-JunoTrim([bool]$restore) {

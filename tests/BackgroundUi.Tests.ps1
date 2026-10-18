@@ -6,6 +6,7 @@ $backgroundUiRoot=Split-Path $PSScriptRoot -Parent
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 . (Join-Path $backgroundUiRoot 'BackgroundInventory.ps1')
+. (Join-Path $backgroundUiRoot 'UiSupport.ps1')
 foreach($spec in @(@{File='Juno.ps1';Names=@('New-Label','New-Button')},@{File='PermisosSegundoPlano.ps1';Names=@('Show-BackgroundPermissions')})){
     $tokens=$null;$errors=$null
     $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $backgroundUiRoot $spec.File),[ref]$tokens,[ref]$errors)

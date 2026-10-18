@@ -1,4 +1,4 @@
-﻿JUNO v0.8 - Windows 10 / Windows 11
+﻿JUNO v0.8.1 - Windows 10 / Windows 11
 ===================================
 Anteriormente: WinRendimiento v0.7.4.
 
@@ -43,7 +43,7 @@ Restauracion general basica al final.
 NOTAS
 * Sigue siendo portable: NO es un .exe compilado.
 * El icono del acceso directo depende de conservar la carpeta y Juno.ico.
-* La limpieza es irreversible. Algunas acciones necesitan permisos de administrador.
+* JUNO no borra archivos; una limpieza confirmada despues en Windows puede ser irreversible.
 * Permisos de segundo plano: inventario UWP/MSIX, restauraciones pendientes
   y acceso a Ajustes. Home requiere gestion manual; Pro 1703+ solo ofrece
   solicitudes por directiva con administrador y sin gestion externa.
@@ -53,3 +53,11 @@ NOTAS
 * No se cambian configuraciones ni se borra nada solo por abrir la app.
 * Pruebas automatizadas aisladas en PowerShell 5.1 x86/x64; quedan pendientes
   la interfaz real y la eficacia sobre apps de prueba en Windows 10/11.
+* El analisis de temporales es de solo lectura y se puede cancelar. Las consultas
+  de discos, procesos e inventario de apps aun pueden demorar la ventana.
+* Si una ventana no cabe en la pantalla, usa sus barras de desplazamiento.
+  Los textos recortados tienen ayuda al pasar el puntero.
+* Guia de navegacion sin cambios y pruebas autorizadas de restauracion:
+  docs\0.8.1-etapa5.md. Las pruebas reales de DPI/monitores siguen pendientes.
+* Ronda breve de solo lectura para Windows 10 y 11:
+  docs\0.8.1-pruebas-solo-lectura.md.

@@ -15,6 +15,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
 . (Join-Path $PSScriptRoot 'BackupStore.ps1')
 . (Join-Path $PSScriptRoot 'RecoveryOperations.ps1')
 . (Join-Path $PSScriptRoot 'BackgroundInventory.ps1')
+. (Join-Path $PSScriptRoot 'UiSupport.ps1')
 try { Enter-JunoLease }
 catch {
     [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'JUNO - recurso ocupado o inaccesible', 'OK', 'Warning')
@@ -87,7 +88,7 @@ function Get-GuidFromText([string]$text) {
     return $null
 }
 function Invoke-PowerCfg([string[]]$arguments) {
-    $result = & "$env:WINDIR\System32\powercfg.exe" @arguments 2>&1 | Out-String
+    $result = & (Get-JunoSystemTool 'powercfg.exe') @arguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         throw ("Powercfg no pudo ejecutar '{0}': {1}" -f ($arguments -join ' '), $result.Trim())
     }
@@ -328,7 +329,7 @@ try {
     }
 } catch { }
 $form.Controls.Add((New-Label 'JUNO' 88 12 550 39 22 $true $white))
-$form.Controls.Add((New-Label 'Optimizacion controlada, sin desactivar servicios de Windows. Desplaza para ver las secciones.' 88 52 685 24 10 $false $muted))
+$form.Controls.Add((New-Label 'Ajustes controlados. Desplaza para ver las siete secciones.' 88 52 615 24 10 $false $muted))
 
 $scrollHost = New-Object System.Windows.Forms.Panel
 $scrollHost.Location = New-Object System.Drawing.Point(0, 79)
@@ -340,8 +341,9 @@ $form.Controls.Add($scrollHost)
 # Se conserva la altura compacta para pantallas con resolucion vertical reducida.
 $panelPower = New-Panel 22 6 666 116
 $panelPower.Controls.Add((New-Label '1. Plan de energia' 17 7 600 28 15 $true $white))
-$panelPower.Controls.Add((New-Label 'Alto rendimiento (administrador). Si falta, crea el plan oficial.' 17 37 620 25 10 $false $muted))
+$panelPower.Controls.Add((New-Label 'Requiere administrador. Modern Standby puede limitar los planes disponibles.' 17 37 620 25 10 $false $muted))
 $btnPower = New-Button 'Activar Alto rendimiento' 17 70 282 36 $green
+try {$btnPower.Enabled=Test-JunoAdmin} catch {$btnPower.Enabled=$false}
 $btnPlans = New-Button 'Ver planes de energia' 317 70 330 36 $gray
 $panelPower.Controls.Add($btnPower)
 $panelPower.Controls.Add($btnPlans)
@@ -392,8 +394,8 @@ $scrollHost.Controls.Add($panelBackground)
 # Tarjeta 6: solo abre el analizador, sin borrar nada al iniciar.
 $panelCleanup = New-Panel 22 729 666 120
 $panelCleanup.Controls.Add((New-Label '6. Limpieza inteligente' 17 7 630 28 15 $true $white))
-$panelCleanup.Controls.Add((New-Label 'Analiza archivos temporales antiguos y elegi que eliminar.' 17 36 630 25 10 $false $muted))
-$btnCleanup = New-Button 'Analizar y limpiar temporales' 17 70 630 36 $blue
+$panelCleanup.Controls.Add((New-Label 'Consulta temporales y revisa la limpieza en Windows. JUNO no borra archivos.' 17 36 630 25 10 $false $muted))
+$btnCleanup = New-Button 'Analizar temporales y revisar en Windows' 17 70 630 36 $blue
 $panelCleanup.Controls.Add($btnCleanup)
 $scrollHost.Controls.Add($panelCleanup)
 # Tarjeta 7: diagnostico de almacenamiento (no aplica cambios al abrir).
@@ -408,7 +410,7 @@ $scrollHost.Controls.Add($panelDisks)
 $panelRestore = New-Panel 22 989 666 145
 $panelRestore.Controls.Add((New-Label 'Restauracion de ajustes generales' 17 7 630 28 15 $true $white))
 $panelRestore.Controls.Add((New-Label 'Revierte solo energia, efectos visuales y transparencia guardados.' 17 36 630 24 10 $false $muted))
-$panelRestore.Controls.Add((New-Label 'Inicio, segundo plano y TRIM se restauran por separado. La limpieza no se deshace.' 17 59 630 24 9 $false $muted))
+$panelRestore.Controls.Add((New-Label 'Inicio, segundo plano y TRIM se restauran por separado. La limpieza no se deshace.' 17 62 630 24 9 $false $muted))
 $btnRestore = New-Button 'Restaurar energia, efectos y transparencia' 17 95 630 36 $gray
 $panelRestore.Controls.Add($btnRestore)
 $scrollHost.Controls.Add($panelRestore)
@@ -416,7 +418,7 @@ $scrollHost.AutoScrollMinSize = New-Object System.Drawing.Size(0, 1150)
 
 $status = New-Label 'Estado: listo. Ningun cambio se aplica automaticamente.' 26 632 665 24 10 $false $white
 $form.Controls.Add($status)
-$form.Controls.Add((New-Label 'Respaldos: %LOCALAPPDATA%\WinRendimiento (compatibles)  |  Limpieza irreversible' 26 660 680 20 9 $false $muted))
+$form.Controls.Add((New-Label 'Respaldos: usuario en LocalAppData; equipo protegido en ProgramData. Consulta LEEME.' 26 660 680 20 9 $false $muted))
 
 function Update-TransparencyLabel {
     try {
@@ -440,24 +442,24 @@ $btnPower.Add_Click({
     try { Show-Result (Enable-HighPerformance) $false }
     catch { Show-Result ("Operacion de energia pendiente o fallida: $($_.Exception.Message)`n`nRevisa el plan activo antes de reintentar. Modern Standby puede limitar los planes disponibles.") $true }
 })
-$btnPlans.Add_Click({ Start-Process 'control.exe' -ArgumentList 'powercfg.cpl' })
+$btnPlans.Add_Click({try {Start-Process (Get-JunoSystemTool 'control.exe') -ArgumentList 'powercfg.cpl'}catch {Show-Result $_.Exception.Message $true}})
 $btnVisual.Add_Click({
     try { Show-Result (Apply-VisualEffects $false) $false }
-    catch { Show-Result ("Error al ajustar los efectos visuales: $($_.Exception.Message)") $true }
+    catch { Show-Result ("Ajuste visual pendiente o fallido: $($_.Exception.Message)") $true }
 })
 $btnVisualFont.Add_Click({
     try { Show-Result (Apply-VisualEffects $true) $false }
-    catch { Show-Result ("Error al ajustar los efectos visuales: $($_.Exception.Message)") $true }
+    catch { Show-Result ("Ajuste visual pendiente o fallido: $($_.Exception.Message)") $true }
 })
-$btnVisualCheck.Add_Click({ Start-Process "$env:WINDIR\System32\SystemPropertiesPerformance.exe" })
+$btnVisualCheck.Add_Click({try {Start-Process (Get-JunoSystemTool 'SystemPropertiesPerformance.exe')}catch {Show-Result $_.Exception.Message $true}})
 $btnTransOff.Add_Click({
     try { Show-Result (Set-Transparency $false) $false }
-    catch { Show-Result ("Error al desactivar transparencia: $($_.Exception.Message)") $true }
+    catch { Show-Result ("Transparencia pendiente o fallida: $($_.Exception.Message)") $true }
     finally { Update-TransparencyLabel }
 })
 $btnTransOn.Add_Click({
     try { Show-Result (Set-Transparency $true) $false }
-    catch { Show-Result ("Error al activar transparencia: $($_.Exception.Message)") $true }
+    catch { Show-Result ("Transparencia pendiente o fallida: $($_.Exception.Message)") $true }
     finally { Update-TransparencyLabel }
 })
 $btnTransCheck.Add_Click({
@@ -500,10 +502,15 @@ $btnRestore.Add_Click({
     try { $results += (Restore-PowerPlan) }
     catch { $hadErrors = $true; $results += "Energia: $($_.Exception.Message)" }
     Update-TransparencyLabel
+    if($hadErrors){$results=@('Restauracion parcial o pendiente. Revisa cada resultado y conserva los respaldos.')+$results}
     Show-Result ($results -join "`n") $hadErrors
 })
-[void][System.Windows.Forms.Application]::Run($form)
-if ($null -ne $script:JunoImage) { $script:JunoImage.Dispose() }
-if ($null -ne $script:JunoIcon) { $script:JunoIcon.Dispose() }
+Initialize-JunoWindow $form
+try { [void][System.Windows.Forms.Application]::Run($form) }
+finally {
+    $form.Dispose()
+    if ($null -ne $script:JunoImage) { $script:JunoImage.Dispose() }
+    if ($null -ne $script:JunoIcon) { $script:JunoIcon.Dispose() }
+}
 
 } finally { Exit-JunoLease }
