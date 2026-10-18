@@ -174,6 +174,74 @@ function Save-StartupBackup($backup) {
     Set-Content -LiteralPath $tmp -Encoding UTF8 -Value $json
     Move-Item -LiteralPath $tmp -Destination $script:StartupBackupPath -Force
 }
+function Get-StartupApprovalSnapshot($value) {
+    if ($value.Exists -and $value.Kind -ne 'Binary') { throw 'Valor de control de inicio no binario.' }
+    $data = if ($value.Exists) { [Convert]::ToBase64String([byte[]]$value.Data) } else { $null }
+    return [pscustomobject]@{ Exists=[bool]$value.Exists; Data=$data }
+}
+function Test-StartupApprovalSnapshot($actual, $expected) {
+    return ([bool]$actual.Exists -eq [bool]$expected.Exists -and
+        (-not $actual.Exists -or [string]$actual.Data -ceq [string]$expected.Data))
+}
+function Initialize-StartupTransaction($record) {
+    if ($record.PSObject.Properties.Name -contains 'Transaction') {
+        if ($null -eq $record.Transaction -or $record.Transaction.Version -ne 1) {
+            throw 'Registro de recuperacion de inicio incompatible; se conserva el respaldo.'
+        }
+        return
+    }
+    # En v0.8 LastWrittenData era una INTENCION, no una confirmacion.
+    $pending = if ($record.LastWrittenData) {
+        [pscustomobject]@{ Exists=$true; Data=[string]$record.LastWrittenData; Action='Apply' }
+    } else { $null }
+    $transaction = [pscustomobject]@{
+        Version=1
+        Confirmed=[pscustomobject]@{ Exists=[bool]$record.OriginalExists; Data=$record.OriginalData }
+        Pending=$pending
+    }
+    Add-Member -InputObject $record -MemberType NoteProperty -Name Transaction -Value $transaction
+    $record.LastWrittenData = $null
+}
+function Sync-StartupTransaction($record, $actual) {
+    $transaction = $record.Transaction
+    if ($null -ne $transaction.Pending -and (Test-StartupApprovalSnapshot $actual $transaction.Pending)) {
+        $pending = $transaction.Pending
+        $transaction.Confirmed = [pscustomobject]@{ Exists=[bool]$actual.Exists; Data=$actual.Data }
+        $record.LastWrittenData = if ($pending.Action -eq 'Apply') { $actual.Data } else { $null }
+    } elseif (-not (Test-StartupApprovalSnapshot $actual $transaction.Confirmed)) {
+        throw 'La configuracion fue modificada fuera de JUNO. No se sobrescribio.'
+    }
+    # Si sigue el estado confirmado, la escritura pendiente no se aplico.
+    $transaction.Pending = $null
+}
+function Write-StartupTransaction($backup, $record, $target, [string]$action) {
+    $transaction = $record.Transaction
+    $transaction.Pending = [pscustomobject]@{ Exists=[bool]$target.Exists; Data=$target.Data; Action=$action }
+    Save-StartupBackup $backup
+    # Releer despues de guardar la intencion y antes de modificar Windows.
+    $actual = Get-StartupApprovalSnapshot (Read-StartupRegValue $record.ApprovalHive $record.ApprovalView $record.ApprovalKey $record.ApprovalValue)
+    if (-not (Test-StartupApprovalSnapshot $actual $transaction.Confirmed)) {
+        throw 'La configuracion de inicio cambio antes de escribir. Se conserva la operacion pendiente.'
+    }
+    $key = Open-StartupRegKey $record.ApprovalHive $record.ApprovalView $record.ApprovalKey $true ($action -eq 'Apply')
+    if ($null -eq $key) { throw 'No se puede abrir el control de inicio de Windows.' }
+    try {
+        if ($target.Exists) {
+            $bytes = [Convert]::FromBase64String([string]$target.Data)
+            $key.SetValue([string]$record.ApprovalValue, [byte[]]$bytes, [Microsoft.Win32.RegistryValueKind]::Binary)
+        } else {
+            $key.DeleteValue([string]$record.ApprovalValue, $false)
+        }
+    } finally { $key.Close() }
+    $check = Get-StartupApprovalSnapshot (Read-StartupRegValue $record.ApprovalHive $record.ApprovalView $record.ApprovalKey $record.ApprovalValue)
+    if (-not (Test-StartupApprovalSnapshot $check $target)) {
+        throw 'No se pudo verificar la escritura de inicio. Se conserva la operacion pendiente.'
+    }
+    $transaction.Confirmed = [pscustomobject]@{ Exists=[bool]$check.Exists; Data=$check.Data }
+    $transaction.Pending = $null
+    $record.LastWrittenData = if ($action -eq 'Apply') { $check.Data } else { $null }
+    Save-StartupBackup $backup
+}
 function Set-StartupState($entry, [bool]$enable) {
     if (-not $entry.Editable) { throw "No se puede modificar: $($entry.Name)." }
     $currentFingerprint = Get-StartupSourceFingerprint $entry
@@ -181,13 +249,13 @@ function Set-StartupState($entry, [bool]$enable) {
     $desiredState = if ($enable) { 'Activo' } else { 'Desactivado' }
     $originalApproved = Read-StartupRegValue $entry.ApprovalHive $entry.ApprovalView $entry.ApprovalKey $entry.ApprovalValue
     $previousState = Get-StartupFlag $originalApproved
-    if ($previousState -eq $desiredState) { return "$($entry.Name): ya estaba $desiredState." }
     if ($previousState -eq 'Desconocido') { throw "$($entry.Name): tiene un estado no reconocido. Usa el Administrador de tareas." }
     if ($originalApproved.Exists -and $originalApproved.Kind -ne 'Binary') { throw "$($entry.Name): valor de control no binario." }
 
     $backup = Get-StartupBackup
     $saved = @($backup.Entries | Where-Object { $_.Id -ceq $entry.Id } | Select-Object -First 1)
     if ($saved.Count -eq 0) {
+        if ($previousState -eq $desiredState) { return "$($entry.Name): ya estaba $desiredState." }
         $originalBytes = if ($originalApproved.Exists) { [Convert]::ToBase64String([byte[]]$originalApproved.Data) } else { $null }
         $record = [pscustomobject]@{
             Id=$entry.Id; Name=$entry.Name; ApprovalHive=$entry.ApprovalHive;
@@ -202,10 +270,12 @@ function Set-StartupState($entry, [bool]$enable) {
         if ($record.Fingerprint -cne $currentFingerprint) {
             throw "$($entry.Name): cambio el ejecutable desde la copia inicial. No se modifico."
         }
-        $currentBytes = if ($originalApproved.Exists) { [Convert]::ToBase64String([byte[]]$originalApproved.Data) } else { $null }
-        if ($record.LastWrittenData -and $currentBytes -cne $record.LastWrittenData) {
-            throw "$($entry.Name): el estado fue modificado por otra herramienta. No se sobrescribio."
-        }
+    }
+    Initialize-StartupTransaction $record
+    Sync-StartupTransaction $record (Get-StartupApprovalSnapshot $originalApproved)
+    if ($previousState -eq $desiredState) {
+        Save-StartupBackup $backup
+        return "$($entry.Name): ya estaba $desiredState. Registro de recuperacion verificado."
     }
     $bytes = New-Object byte[] 12
     if ($enable) { $bytes[0] = 2 } else { $bytes[0] = 3 }
@@ -213,15 +283,8 @@ function Set-StartupState($entry, [bool]$enable) {
         $timestampBytes = [BitConverter]::GetBytes([DateTime]::UtcNow.ToFileTimeUtc())
         [Array]::Copy($timestampBytes, 0, $bytes, 4, 8)
     }
-    # Guardar antes de aplicar: nunca perder el estado previo si el programa falla.
-    $record.LastWrittenData = [Convert]::ToBase64String($bytes)
-    Save-StartupBackup $backup
-    $reg = Open-StartupRegKey $entry.ApprovalHive $entry.ApprovalView $entry.ApprovalKey $true $true
-    if ($null -eq $reg) { throw "No se pudo abrir el control de inicio de $($entry.Name)." }
-    try { $reg.SetValue($entry.ApprovalValue, [byte[]]$bytes, [Microsoft.Win32.RegistryValueKind]::Binary) }
-    finally { $reg.Close() }
-    $check = Read-StartupRegValue $entry.ApprovalHive $entry.ApprovalView $entry.ApprovalKey $entry.ApprovalValue
-    if ((Get-StartupFlag $check) -ne $desiredState) { throw "Windows no conservo el estado de $($entry.Name)." }
+    $target = [pscustomobject]@{ Exists=$true; Data=[Convert]::ToBase64String($bytes) }
+    Write-StartupTransaction $backup $record $target 'Apply'
     return "$($entry.Name): $desiredState."
 }
 function Restore-StartupState {
@@ -241,20 +304,13 @@ function Restore-StartupState {
                 throw 'La entrada original cambio o ya no existe.'
             }
             $current = Read-StartupRegValue $record.ApprovalHive $record.ApprovalView $record.ApprovalKey $record.ApprovalValue
-            $actual = if ($current.Exists) { [Convert]::ToBase64String([byte[]]$current.Data) } else { $null }
-            if (-not $current.Exists -or $current.Kind -ne 'Binary' -or $actual -cne $record.LastWrittenData) {
-                throw 'La configuracion fue modificada fuera de JUNO.'
+            Initialize-StartupTransaction $record
+            $actual = Get-StartupApprovalSnapshot $current
+            Sync-StartupTransaction $record $actual
+            $original = [pscustomobject]@{ Exists=[bool]$record.OriginalExists; Data=$record.OriginalData }
+            if (-not (Test-StartupApprovalSnapshot $actual $original)) {
+                Write-StartupTransaction $backup $record $original 'Restore'
             }
-            $key = Open-StartupRegKey $record.ApprovalHive $record.ApprovalView $record.ApprovalKey $true $false
-            if ($null -eq $key) { throw 'No se puede abrir la clave de Windows.' }
-            try {
-                if ([bool]$record.OriginalExists) {
-                    $original = [Convert]::FromBase64String([string]$record.OriginalData)
-                    $key.SetValue([string]$record.ApprovalValue, [byte[]]$original, [Microsoft.Win32.RegistryValueKind]::Binary)
-                } else {
-                    $key.DeleteValue([string]$record.ApprovalValue, $false)
-                }
-            } finally { $key.Close() }
             $count++
         } catch {
             $remaining.Add($record)

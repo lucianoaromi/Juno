@@ -253,8 +253,12 @@ function Show-BackgroundPermissions([System.Windows.Forms.Form]$parent) {
                     if (@($ctx.PolicyBackup.Owned) -contains $family) { $restorable = $true }
                 } else { $blockable = $true }
             } else {
-                $owned = @($ctx.UserBackup.Items | Where-Object { $_.Family -eq $family }).Count -gt 0
-                if ($owned) { $restorable = $true }
+                $saved = @($ctx.UserBackup.Items | Where-Object { $_.Family -eq $family } | Select-Object -First 1)
+                $owned = $saved.Count -gt 0
+                if ($owned) {
+                    $restorable = $true
+                    if (Test-BPUApplyPending $saved[0]) { $blockable = $true }
+                }
                 else { $blockable = $true }
             }
         }
@@ -286,7 +290,7 @@ function Show-BackgroundPermissions([System.Windows.Forms.Form]$parent) {
                     $s = Get-BPUState $app.Family
                     $owned = @($ctx.UserBackup.Items | Where-Object { $_.Family -eq $app.Family }).Count -gt 0
                     $row.Cells[2].Value = if (-not $s.Available) { 'No configurable desde este modulo' }
-                        elseif ($owned) { 'Registro: bloqueado por JUNO' }
+                        elseif ($owned) { 'Registro: cambio respaldado; verificar' }
                         elseif ($s.IsOff) { 'Ya desactivada en Registro' }
                         else { 'Registro: sin bloqueo individual' }
                     $row.Cells[0].ReadOnly = (-not $canWrite) -or $policyBusy -or ($glob -eq 1) -or (-not $s.Available) -or ($s.IsOff -and -not $owned) -or ($ctx.Policy.Deny -contains $app.Family) -or ($ctx.Policy.Allow -contains $app.Family)
