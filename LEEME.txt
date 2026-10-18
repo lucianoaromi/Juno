@@ -44,7 +44,12 @@ NOTAS
 * Sigue siendo portable: NO es un .exe compilado.
 * El icono del acceso directo depende de conservar la carpeta y Juno.ico.
 * La limpieza es irreversible. Algunas acciones necesitan permisos de administrador.
-* La gestion de permisos en segundo plano es limitada en Windows 11;
-  escribir una clave no garantiza que Windows cambie el permiso real.
+* Permisos de segundo plano: inventario UWP/MSIX, restauraciones pendientes
+  y acceso a Ajustes. Home requiere gestion manual; Pro 1703+ solo ofrece
+  solicitudes por directiva con administrador y sin gestion externa.
+  No se aplican restricciones HKCU nuevas. Se restauran sus respaldos antiguos.
+  Escritura confirmada no significa politica reconocida ni restriccion efectiva.
+  Compatibilidad, limites y validacion real pendiente: docs\0.8.1-etapa4.md.
 * No se cambian configuraciones ni se borra nada solo por abrir la app.
-* Probado por inspeccion estatica aqui; hay que probar la interfaz en Windows 10/11.
+* Pruebas automatizadas aisladas en PowerShell 5.1 x86/x64; quedan pendientes
+  la interfaz real y la eficacia sobre apps de prueba en Windows 10/11.

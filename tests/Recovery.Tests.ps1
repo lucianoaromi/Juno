@@ -9,7 +9,7 @@ function Get-JunoIdentity { [pscustomobject]@{Sid='TEST-SID';Machine='11111111-2
 function Test-JunoAdmin { return $false }
 foreach ($spec in @(
     @{ File='Inicio.ps1'; Names=@('Get-StartupFlag','Get-StartupBackup','Save-StartupBackup','Get-StartupApprovalSnapshot','Test-StartupApprovalSnapshot','Initialize-StartupTransaction','Sync-StartupTransaction','Write-StartupTransaction','Set-StartupState','Restore-StartupState') },
-    @{ File='PermisosUsuario.ps1'; Names=@('Get-BPUBackup','Save-BPUBackup','Test-BPUValueSnapshot','Initialize-BPUTransaction','Test-BPUApplyPending','Sync-BPUTransaction','Set-BPURegistryValue','Write-BPUTransactionValue','Disable-BPUApps','Restore-BPUApps') }
+    @{ File='PermisosUsuario.ps1'; Names=@('Get-BPUBackup','Save-BPUBackup','Test-BPUValueSnapshot','Initialize-BPUTransaction','Test-BPUApplyPending','Sync-BPUTransaction','Set-BPURegistryValue','Write-BPUTransactionValue','Assert-BPUApplySupported','Disable-BPUApps','Restore-BPUApps') }
 )) {
     $tokens=$null; $parseErrors=$null
     $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $recoveryRoot $spec.File),[ref]$tokens,[ref]$parseErrors)
@@ -255,6 +255,9 @@ Describe 'Permisos de usuario: dos DWORD recuperables sin Registro real' {
     BeforeEach {
         Enter-JunoLease ('Local\Juno.Tests.Recovery.'+[Guid]::NewGuid().ToString('N'))
         Reset-RecoveryFake
+        # Simular historicos de etapas 1-3 para probar su recuperacion. La entrada real
+        # ahora rechaza nuevas peticiones HKCU; se verifica sin este mock en Background.Tests.
+        Mock Assert-BPUApplySupported {}
         Mock Test-BPULocalPolicy { [pscustomobject]@{} }
         Mock Get-BPPPackages { [pscustomobject]@{Family='Test_pkg'} }
         Mock Get-BPUBackup { Copy-RecoveryObject $global:JunoRecoveryFake.BpuDisk }

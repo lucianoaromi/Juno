@@ -112,13 +112,8 @@ function Get-BgVerifiedProcess($entry) {
 }
 
 function Get-BgSettingsUri {
-    # CurrentBuildNumber diferencia Windows 11 (22000+) de Windows 10.
-    # En ambos casos la pantalla administra solo aplicaciones compatibles.
-    try {
-        $build = [int](Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name CurrentBuildNumber -ErrorAction Stop).CurrentBuildNumber
-        if ($build -ge 22000) { return 'ms-settings:appsfeatures' }
-    } catch { }
-    return 'ms-settings:privacy-backgroundapps'
+    try {if((Get-BPPHostInfo).Build -lt 22000){return 'ms-settings:privacy-backgroundapps'}} catch { }
+    return 'ms-settings:appsfeatures'
 }
 
 function Show-BackgroundManager([System.Windows.Forms.Form]$parent) {
@@ -136,7 +131,7 @@ function Show-BackgroundManager([System.Windows.Forms.Form]$parent) {
     $script:BgDialog = $dialog
 
     $dialog.Controls.Add((New-Label '7. Procesos y aplicaciones en segundo plano' 20 12 968 32 18 $true $white))
-    $dialog.Controls.Add((New-Label 'Mide RAM y CPU. Cerrar ahora NO impide que una app vuelva a iniciarse.' 22 48 964 23 10 $false $muted))
+    $dialog.Controls.Add((New-Label 'Mide RAM y CPU. Cerrar un proceso no cambia permisos; la aplicacion puede reiniciarse.' 22 48 964 23 10 $false $muted))
     $dialog.Controls.Add((New-Label 'Una app sin ventana no necesariamente esta consumiendo recursos en segundo plano.' 22 72 964 23 9 $false $muted))
 
     $grid = New-Object System.Windows.Forms.DataGridView

@@ -4,6 +4,7 @@ $ErrorActionPreference='Stop'
 $operationRoot=Split-Path $PSScriptRoot -Parent
 . (Join-Path $operationRoot 'BackupStore.ps1')
 . (Join-Path $operationRoot 'RecoveryOperations.ps1')
+. (Join-Path $operationRoot 'BackgroundInventory.ps1')
 foreach($spec in @(
     @{File='Juno.ps1';Names=@('Get-Backup','Save-Backup','Enable-HighPerformance','Restore-PowerPlan','Apply-VisualEffects','Restore-VisualEffects','Set-Transparency','Restore-Transparency')},
     @{File='PermisosSegundoPlano.ps1';Names=@('Read-BPPBackup','Write-BPPBackup','Disable-BPPApps','Restore-BPPApps')},
@@ -120,7 +121,10 @@ Describe 'Diarios de energia, visuales, transparencia, directiva y TRIM sin Wind
             if($global:JunoOperationFake.PolicyState.Global.Exists -and $global:JunoOperationFake.PolicyState.Global.Value -ne 0){throw 'Directiva general externa'}
             return [pscustomobject]@{}
         }
-        Mock Get-BPPPackages {@([pscustomobject]@{Family='Test_pkg'},[pscustomobject]@{Family='Other_pkg'})}
+        # Esta suite aísla el motor de diario histórico. Las restricciones de elegibilidad
+        # y propiedad de etapa 4 se ejercitan sin este mock en Background.Tests.ps1.
+        Mock Assert-BPPPolicyOwnership {}
+        Mock Get-BPPPackages {@([pscustomobject]@{Family='Test_pkg';Compatibility='Compatible';Type='UWP';Installed=$true;Protected=$false},[pscustomobject]@{Family='Other_pkg';Compatibility='Compatible';Type='UWP';Installed=$true;Protected=$false})}
         Mock Get-JunoPolicyState {Copy-JunoObject $global:JunoOperationFake.PolicyState}
         Mock Set-JunoPolicyValue {param($field,$target)Assert-JunoValueSnapshot $target $field;Write-OperationFake {$global:JunoOperationFake.PolicyState.$field=Copy-JunoObject $target}}
         Mock Get-DiskTrimState {[pscustomobject]@{State=$global:JunoOperationFake.TrimState}}

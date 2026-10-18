@@ -1,7 +1,7 @@
 ﻿# JUNO 0.7.2 - Permisos de segundo plano DEL USUARIO ACTUAL.
-# Este metodo de Registro reproduce los indicadores usados en Windows 10.
-# Windows 11 NO garantiza que estos DWORD equivalgan a la opcion 'Nunca'.
-# SOLO modificar subclaves EXISTENTES de apps opcionales. No tocar HKLM.
+# Disabled/DisabledByUser no son un contrato documentado de permisos efectivos.
+# Las peticiones nuevas estan deshabilitadas; se conserva el motor para recuperar
+# respaldos historicos, con subclaves existentes y deteccion de conflictos. No tocar HKLM.
 $script:BPUPath = 'Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications'
 $script:BPUBackupPath = Join-Path $script:AppFolder 'background-user.json'
 
@@ -41,12 +41,10 @@ function Get-BPUBackup {
 }
 function Save-BPUBackup($backup) { Write-JunoStore 'BPU' $backup 'User' }
 function Test-BPULocalPolicy {
-    $envInfo = Get-BPPEnvironment
-    if ($envInfo.Domain) { throw 'Equipo gestionado o dominio desconocido: no se cambian permisos.' }
-    $policy = Get-BPPPolicy
-    if ($policy.HasGlobal -and $policy.Global -ne 0) {
-        throw 'Ya existe una directiva de segundo plano que prevalece sobre ajustes de usuario.'
-    }
+    $environment=Get-BPPEnvironment
+    if(-not $environment.ManagementKnown -or $environment.Managed){throw 'Administracion del equipo externa o desconocida; se conserva el respaldo del usuario.'}
+    $policy=Get-JunoPolicyState
+    if($policy.Global.Exists -or $policy.Deny.Exists -or $policy.Allow.Exists -or $policy.UserControl.Exists){throw 'Hay configuracion de directiva de equipo: resolverla antes de restaurar valores HKCU.'}
     return $policy
 }
 function Test-BPUValueSnapshot($actual, $expected) {
@@ -133,7 +131,11 @@ function Write-BPUTransactionValue($backup, $entry, [string]$name, $target) {
     $step.Pending = $null
     Save-BPUBackup $backup
 }
+function Assert-BPUApplySupported {
+    throw 'Solicitud no compatible: Disabled/DisabledByUser en HKCU no son un contrato documentado de permisos. JUNO solo restaura respaldos historicos; usa Ajustes de Windows para cambios nuevos.'
+}
 function Disable-BPUApps([string[]]$families) {
+    Assert-BPUApplySupported
     Assert-JunoLease
     if ($families.Count -eq 0) { return 'No hay aplicaciones seleccionadas.' }
     $null = Test-BPULocalPolicy
@@ -205,5 +207,5 @@ function Restore-BPUApps([string[]]$families) {
         Save-BPUBackup $backup
         $restored++
     }
-    return "Valores originales restaurados: $restored aplicacion(es). Verifica en Ajustes el permiso real."
+    return "Valores originales restaurados y comprobados en Registro: $restored aplicacion(es). El permiso efectivo sigue sin verificar."
 }

@@ -14,6 +14,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
 
 . (Join-Path $PSScriptRoot 'BackupStore.ps1')
 . (Join-Path $PSScriptRoot 'RecoveryOperations.ps1')
+. (Join-Path $PSScriptRoot 'BackgroundInventory.ps1')
 try { Enter-JunoLease }
 catch {
     [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'JUNO - recurso ocupado o inaccesible', 'OK', 'Warning')
@@ -382,7 +383,7 @@ $scrollHost.Controls.Add($panelTools)
 $panelBackground = New-Panel 22 556 666 163
 $panelBackground.Controls.Add((New-Label '5. Aplicaciones en segundo plano' 17 7 630 28 15 $true $white))
 $panelBackground.Controls.Add((New-Label 'Configura permisos futuros o revisa procesos activos. Son funciones diferentes.' 17 36 630 25 10 $false $muted))
-$btnPermissions = New-Button 'Desactivar apps en segundo plano' 17 70 630 36 $green
+$btnPermissions = New-Button 'Revisar permisos de segundo plano' 17 70 630 36 $green
 $btnBackground = New-Button 'Ver procesos activos (RAM / CPU)' 17 115 630 36 $blue
 $panelBackground.Controls.Add($btnPermissions)
 $panelBackground.Controls.Add($btnBackground)

@@ -258,9 +258,10 @@ function Invoke-JunoPolicy([string[]]$families,[bool]$restore) {
     Assert-JunoLease
     if($families.Count -eq 0){return 'No hay aplicaciones seleccionadas.'}
     foreach($family in $families){Assert-JunoFamily $family}
-    $null=Confirm-BPPWrite
+    $null=Confirm-BPPWrite $restore
     Import-JunoMachineLegacy 'Policy'
     $backup=Read-BPPBackup; $state=Get-JunoPolicyState
+    Assert-BPPPolicyOwnership $backup $state -Request:(-not $restore)
     if($backup.PSObject.Properties.Name -notcontains 'Transaction' -or $backup.Transaction.Phase -eq 'Restored'){
         $original=[pscustomobject]@{Deny=(Copy-JunoObject $state.Deny);Global=(Copy-JunoObject $state.Global)}
         if($backup.Owned.Count -gt 0 -or $backup.MadeGlobal){
@@ -287,7 +288,7 @@ function Invoke-JunoPolicy([string[]]$families,[bool]$restore) {
         if($left.Count -eq 0){$backup.MadeGlobal=$false;$t.Phase='Restored'}else{$t.Phase='Applied'}
     }else{
         if($t.Phase -eq 'Restoring'){throw 'Completa la restauracion de directivas pendiente.'}
-        $valid=@(Get-BPPPackages|ForEach-Object{$_.Family});$added=@()
+        $valid=@(Get-BPPPackages|Where-Object{$_.Compatibility -ceq 'Compatible' -and $_.Type -ceq 'UWP' -and $_.Installed -and -not $_.Protected}|ForEach-Object{$_.Family});$added=@()
         foreach($f in @($families|Select-Object -Unique)){
             if($valid -notcontains $f){throw 'La aplicacion ya no es una app opcional permitida.'}
             if($state.Allow.Value -contains $f -or $state.UserControl.Value -contains $f){throw 'Existe una directiva de permiso/control de usuario. No se sobrescribira.'}
@@ -301,8 +302,8 @@ function Invoke-JunoPolicy([string[]]$families,[bool]$restore) {
         Sync-JunoPolicy $backup (Get-JunoPolicyState);$t.Phase='Applied'
     }
     Write-BPPBackup $backup
-    if($restore){return "Directiva: restauracion verificada para $($remove.Count) app(s)."}
-    return "Directiva: bloqueo registrado y verificado para $($added.Count) app(s), en todas las cuentas. Verifica su efecto despues de reiniciar las apps."
+    if($restore){return "Directiva: valores originales restaurados y comprobados en Registro para $($remove.Count) app(s). Permiso efectivo no verificado."}
+    return "Solicitud de restriccion: escritura confirmada en Registro para $($added.Count) app(s), en todas las cuentas. Reconocimiento de politica y restriccion efectiva no verificados. Reinicia las apps y comprueba en Windows."
 }
 
 function Invoke-JunoTrimValue([int]$value) {
