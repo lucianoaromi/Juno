@@ -26,7 +26,7 @@ namespace Juno.Preview
                 TextBox text=new TextBox{Name="ConfirmationMessage",Multiline=true,ReadOnly=true,WordWrap=true,ScrollBars=review||message.Length>180?ScrollBars.Vertical:ScrollBars.None,Dock=DockStyle.Fill,Text=message,BackColor=Colors.Canvas,ForeColor=Colors.Text,BorderStyle=BorderStyle.None,TabStop=false};
                 FlowLayoutPanel actions=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=54,FlowDirection=FlowDirection.RightToLeft,Padding=new Padding(0,10,0,0)};
                 PreviewButton cancel=new PreviewButton{Text="Cancelar",Secondary=true,Width=125,Height=36,Font=font,DialogResult=DialogResult.Cancel};
-                string verb=review?"Autorizar":message.IndexOf("restaurar",StringComparison.OrdinalIgnoreCase)>=0?"Restaurar":message.IndexOf("desactivar",StringComparison.OrdinalIgnoreCase)>=0?"Desactivar":message.IndexOf("crear",StringComparison.OrdinalIgnoreCase)>=0?"Crear y activar":"Activar";
+                string verb=review?"Autorizar":message.IndexOf("restaurar",StringComparison.OrdinalIgnoreCase)>=0?"Restaurar":message.IndexOf("desactivar",StringComparison.OrdinalIgnoreCase)>=0?"Desactivar":message.IndexOf("crear",StringComparison.OrdinalIgnoreCase)>=0?"Crear y activar":title.IndexOf("Efectos visuales",StringComparison.OrdinalIgnoreCase)>=0?"Aplicar":"Activar";
                 PreviewButton accept=new PreviewButton{Text=verb,Width=145,Height=36,Font=font,Accent=true,DialogResult=DialogResult.OK};
                 actions.Controls.Add(accept);actions.Controls.Add(cancel);dialog.Controls.Add(text);dialog.Controls.Add(actions);
                 dialog.AcceptButton=cancel;dialog.CancelButton=cancel;dialog.ActiveControl=cancel;

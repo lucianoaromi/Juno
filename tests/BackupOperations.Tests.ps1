@@ -7,7 +7,7 @@ $operationRoot=Split-Path $PSScriptRoot -Parent
 . (Join-Path $operationRoot 'PowerOperations.ps1')
 . (Join-Path $operationRoot 'BackgroundInventory.ps1')
 foreach($spec in @(
-    @{File='Juno.ps1';Names=@('Apply-VisualEffects','Restore-VisualEffects')},
+    @{File='VisualEffectsOperations.ps1';Names=@('Apply-VisualEffects','Restore-VisualEffects')},
     @{File='PowerOperations.ps1';Names=@('Enable-HighPerformance','Restore-PowerPlan')},
     @{File='TransparencyOperations.ps1';Names=@('Get-Backup','Save-Backup','Set-Transparency','Restore-Transparency')},
     @{File='PermisosSegundoPlano.ps1';Names=@('Read-BPPBackup','Write-BPPBackup','Disable-BPPApps','Restore-BPPApps')},

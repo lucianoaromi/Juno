@@ -131,6 +131,18 @@ function Test-JunoVisualTarget($actual,$target) {
     }
     return $true
 }
+function Get-JunoVisualPreset($before,[bool]$keepFont) {
+    $target=Copy-JunoObject $before
+    foreach ($p in $target.Effects.PSObject.Properties) { $p.Value=$false }; $target.Effects.FontSmoothing=$keepFont
+    # SPI modifica UserPreferencesMask como efecto lateral. No predecir bytes internos de Windows.
+    $target.Registry=@($target.Registry | Where-Object {$_.Name -ne 'UserPreferencesMask'})
+    foreach ($r in $target.Registry) {
+        $r.Exists=$true
+        $r.Kind=if($r.Name -in @('DragFullWindows','FontSmoothing','MinAnimate')){'String'}else{'DWord'}
+        $r.Value=switch($r.Name){'IconsOnly'{'1'} 'VisualFXSetting'{if($keepFont){'3'}else{'2'}} 'FontSmoothing'{if($keepFont){'2'}else{'0'}} default{'0'}}
+    }
+    return $target
+}
 function Invoke-JunoVisual([bool]$restore,[bool]$keepFont=$false) {
     Assert-JunoLease
     $backup=Get-Backup
@@ -155,15 +167,7 @@ function Invoke-JunoVisual([bool]$restore,[bool]$keepFont=$false) {
         if ($null -ne $backup.VisualEffects) { $target.Effects=Copy-JunoObject $backup.VisualEffects }
         if ($null -ne $backup.VisualRegistry) { $target.Registry=Copy-JunoObject $backup.VisualRegistry }
     } else {
-        $target=Copy-JunoObject $before
-        foreach ($p in $target.Effects.PSObject.Properties) { $p.Value=$false }; $target.Effects.FontSmoothing=$keepFont
-        # SPI modifica UserPreferencesMask como efecto lateral. No predecir bytes internos de Windows.
-        $target.Registry=@($target.Registry | Where-Object {$_.Name -ne 'UserPreferencesMask'})
-        foreach ($r in $target.Registry) {
-            $r.Exists=$true
-            $r.Kind=if($r.Name -in @('DragFullWindows','FontSmoothing','MinAnimate')){'String'}else{'DWord'}
-            $r.Value=switch($r.Name){'IconsOnly'{'1'} 'VisualFXSetting'{if($keepFont){'3'}else{'2'}} 'FontSmoothing'{if($keepFont){'2'}else{'0'}} default{'0'}}
-        }
+        $target=Get-JunoVisualPreset $before $keepFont
     }
     $t=[pscustomobject]@{Confirmed=(Copy-JunoObject $before);Pending=$true;Phase=$(if($restore){'Restoring'}else{'Applying'})}
     $backup.Journal.Visual=$t
