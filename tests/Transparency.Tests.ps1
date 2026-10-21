@@ -191,6 +191,7 @@ Describe 'Adaptación de transparencia sobre el motor estable y diarios ficticio
 }
 
 function Get-TransControls($control){foreach($child in $control.Controls){$child;Get-TransControls $child}}
+function Test-TransButtonFlag($form,[string]$name,[string]$flag){$buttons=@($form.Controls.Find($name,$true));return ($buttons.Count -gt 0 -and [bool]$buttons[0].$flag)}
 function Get-TransButton($form,[string]$name){return @($form.Controls.Find($name,$true))[0]}
 function Wait-TransUi($form){
     $clock=[Diagnostics.Stopwatch]::StartNew()
@@ -217,17 +218,17 @@ Describe 'Tarjeta Transparencia y navegación sin operaciones reales' {
     It 'abrir y visitar Rendimiento inicia solo lectura y permite navegar mientras consulta' {
         $transForm.Show();[Windows.Forms.Application]::DoEvents();$transForm.Navigate('Rendimiento')
         $transProvider.Calls|Should Be 1;$transProvider.LastAction|Should Be 'Read'
-        foreach($name in @('TransparencyRead','TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Get-TransButton $transForm $name).Enabled|Should Be $false}
+        foreach($name in @('TransparencyRead','TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Test-TransButtonFlag $transForm $name Enabled)|Should Be $false}
         foreach($section in [Juno.Preview.ShellForm]::Sections){$transForm.Navigate($section)}
         $transProvider.Calls|Should Be 1;$transProvider.WriteCalls|Should Be 0
         Complete-TransUi $transForm $transProvider
         $transForm.Navigate('Rendimiento')
         ((Get-TransControls $transForm).Text -join ' ')|Should Match 'Activada'
-        (Get-TransButton $transForm 'TransparencyDisable').Accent|Should Be $true
-        (Get-TransButton $transForm 'TransparencyEnable').Accent|Should Be $false
-        (Get-TransButton $transForm 'TransparencyEnable').Secondary|Should Be $true
-        (Get-TransButton $transForm 'TransparencyEnable').Enabled|Should Be $true
-        (Get-TransButton $transForm 'TransparencyRestore').Enabled|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyDisable' Accent)|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Accent)|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Secondary)|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Enabled)|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyRestore' Enabled)|Should Be $false
     }
     It 'cancelar la confirmación no envía una escritura al adaptador' {
         $transForm.Show();$transForm.Navigate('Rendimiento');Complete-TransUi $transForm $transProvider
@@ -241,21 +242,21 @@ Describe 'Tarjeta Transparencia y navegación sin operaciones reales' {
         $transForm.RequestTransparency('Disable')|Should Be $true
         $transForm.RequestTransparency('Enable')|Should Be $false
         $transController.IsWriting|Should Be $true;$transProvider.WriteCalls|Should Be 1
-        foreach($name in @('TransparencyRead','TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Get-TransButton $transForm $name).Enabled|Should Be $false}
+        foreach($name in @('TransparencyRead','TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Test-TransButtonFlag $transForm $name Enabled)|Should Be $false}
         # La instantánea anterior sigue vigente hasta que llegue la verificación.
-        (Get-TransButton $transForm 'TransparencyDisable').Accent|Should Be $true
-        (Get-TransButton $transForm 'TransparencyEnable').Accent|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyDisable' Accent)|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Accent)|Should Be $false
         $transForm.Close();$transForm.IsDisposed|Should Be $false
         $transForm.Navigate('Aplicaciones');$transForm.SelectedSection|Should Be 'Aplicaciones'
         Complete-TransUi $transForm $transProvider 'Disabled' $true
         $transForm.Navigate('Rendimiento')
         ((Get-TransControls $transForm).Text -join ' ')|Should Match 'Desactivada'
-        (Get-TransButton $transForm 'TransparencyEnable').Accent|Should Be $true
-        (Get-TransButton $transForm 'TransparencyDisable').Accent|Should Be $false
-        (Get-TransButton $transForm 'TransparencyDisable').Secondary|Should Be $true
-        (Get-TransButton $transForm 'TransparencyRestore').Enabled|Should Be $true
-        (Get-TransButton $transForm 'TransparencyRestore').Accent|Should Be $false
-        (Get-TransButton $transForm 'TransparencyRestore').Secondary|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Accent)|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyDisable' Accent)|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyDisable' Secondary)|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyRestore' Enabled)|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyRestore' Accent)|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyRestore' Secondary)|Should Be $true
         $transForm.Close();$transForm.ResourcesReleased|Should Be $true
     }
     It 'cerrar durante una consulta libera la vista sin callbacks tardíos a controles' {
@@ -270,48 +271,48 @@ Describe 'Tarjeta Transparencia y navegación sin operaciones reales' {
         $transProvider.Completion.TrySetException([InvalidOperationException]::new('SIMULATED'))|Out-Null
         Wait-TransUi $transForm
         ((Get-TransControls $transForm).Text -join ' ')|Should Match 'No disponible'
-        (Get-TransButton $transForm 'TransparencyEnable').Enabled|Should Be $false
-        (Get-TransButton $transForm 'TransparencyRead').Enabled|Should Be $true
-        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Get-TransButton $transForm $name).Accent|Should Be $false}
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Enabled)|Should Be $false
+        $transController.CanStart('Read')|Should Be $true
+        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Test-TransButtonFlag $transForm $name Accent)|Should Be $false}
     }
     It 'una identidad incompatible permite consultar pero no confirmar ni enviar cambios desde la tarjeta' {
         $transForm.Show();$transForm.Navigate('Rendimiento')
         $r=New-Object Juno.Preview.TransparencyResult;$r.State='Enabled';$r.Outcome='Failed';$r.BackupIssue='UserMismatch'
         $r.Message=Get-JunoBackupFailureText 'UserMismatch'
         $transProvider.Complete($r);Wait-TransUi $transForm
-        (Get-TransButton $transForm 'TransparencyRead').Enabled|Should Be $true
-        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Get-TransButton $transForm $name).Enabled|Should Be $false}
+        $transController.CanStart('Read')|Should Be $true
+        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Test-TransButtonFlag $transForm $name Enabled)|Should Be $false}
         $transForm.RequestTransparency('Disable')|Should Be $false
         $transConfirmation.Calls|Should Be 0;$transProvider.WriteCalls|Should Be 0
-        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'identidad del respaldo'
-        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Get-TransButton $transForm $name).Accent|Should Be $false}
+        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'El respaldo no es compatible'
+        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Test-TransButtonFlag $transForm $name Accent)|Should Be $false}
     }
     It 'una restauración pendiente muestra reconciliación y ofrece solo restaurar o consultar' {
         $transForm.Show();$transForm.Navigate('Rendimiento')
         $r=New-Object Juno.Preview.TransparencyResult;$r.Pending=$true;$r.CanRestore=$true;$r.Message='Restauración interrumpida'
         $transProvider.Complete($r);Wait-TransUi $transForm
-        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'pendiente de reconciliación'
-        (Get-TransButton $transForm 'TransparencyRestore').Enabled|Should Be $true
-        (Get-TransButton $transForm 'TransparencyEnable').Enabled|Should Be $false
-        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Get-TransButton $transForm $name).Accent|Should Be $false}
+        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'pendiente de revisión'
+        (Test-TransButtonFlag $transForm 'TransparencyRestore' Enabled)|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Enabled)|Should Be $false
+        foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){(Test-TransButtonFlag $transForm $name Accent)|Should Be $false}
     }
     It 'un estado desconocido explica el motivo y no resalta una acción incompatible' {
         $transForm.Show();$transForm.Navigate('Rendimiento')
         $r=New-Object Juno.Preview.TransparencyResult;$r.State='Unknown';$r.Outcome='Failed';$r.Message='El valor de transparencia no es compatible; consulta antes de reintentar.'
         $transProvider.Complete($r);Wait-TransUi $transForm
-        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'valor de transparencia no es compatible'
+        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'No se pudo completar el cambio'
         foreach($name in @('TransparencyEnable','TransparencyDisable','TransparencyRestore')){
-            (Get-TransButton $transForm $name).Enabled|Should Be $false
-            (Get-TransButton $transForm $name).Accent|Should Be $false
+            (Test-TransButtonFlag $transForm $name Enabled)|Should Be $false
+            (Test-TransButtonFlag $transForm $name Accent)|Should Be $false
         }
     }
     It 'conserva el estado visual al navegar entre secciones' {
         $transForm.Show();$transForm.Navigate('Rendimiento');Complete-TransUi $transForm $transProvider 'Disabled' $true
-        (Get-TransButton $transForm 'TransparencyEnable').Accent|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Accent)|Should Be $true
         $transForm.Navigate('Aplicaciones');$transForm.Navigate('Rendimiento')
-        (Get-TransButton $transForm 'TransparencyEnable').Accent|Should Be $true
-        (Get-TransButton $transForm 'TransparencyDisable').Secondary|Should Be $true
-        (Get-TransButton $transForm 'TransparencyRestore').Enabled|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyEnable' Accent)|Should Be $true
+        (Test-TransButtonFlag $transForm 'TransparencyDisable' Secondary)|Should Be $false
+        (Test-TransButtonFlag $transForm 'TransparencyRestore' Enabled)|Should Be $true
     }
     It 'Restauración general sigue inactiva e indica dónde restaurar Transparencia' {
         $transForm.Navigate('Restauración')

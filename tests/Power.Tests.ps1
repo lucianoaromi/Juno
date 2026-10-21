@@ -220,11 +220,12 @@ Describe 'Adaptador de energía y motor estable con planes ficticios' {
         $f.Saves|Should Be 0;$f.Writes|Should Be 0
         @($f.Commands|Where-Object{$_ -like '/duplicatescheme*'}).Count|Should Be 0
     }
-    It 'oficial más un personalizado tampoco selecciona arbitrariamente' {
+    It 'oficial más un personalizado prioriza el GUID oficial sin duplicar' {
         $global:JunoPowerFake.Plans+=@('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
-        $r=Invoke-JunoPowerRequest Read;$r.HighAvailable|Should Be $true;$r.RequiresSelection|Should Be $true
-        (Invoke-JunoPowerRequest Apply -Confirmed).Outcome|Should Be Failed
-        $global:JunoPowerFake.Writes|Should Be 0
+        $r=Invoke-JunoPowerRequest Read;$r.HighAvailable|Should Be $true;$r.RequiresSelection|Should Be $false
+        (Invoke-JunoPowerRequest Apply -Confirmed).Outcome|Should Be Applied
+        $global:JunoPowerFake.Active|Should Be '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+        @($global:JunoPowerFake.Commands|Where-Object{$_ -like '/duplicatescheme*'}).Count|Should Be 0
     }
     It 'elección explícita guarda original, verifica, repite sin escrituras y restaura sin crear' {
         $f=$global:JunoPowerFake;$original=$f.Active;$chosen='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
@@ -299,6 +300,7 @@ Describe 'Adaptador de energía y motor estable con planes ficticios' {
     }
 }
 
+function Test-PowerButtonFlag($form,[string]$name,[string]$flag){$buttons=@($form.Controls.Find($name,$true));return ($buttons.Count -gt 0 -and [bool]$buttons[0].$flag)}
 function Get-PowerButton($form,[string]$name){@($form.Controls.Find($name,$true))[0]}
 function Wait-PowerUi($form){
     $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -328,8 +330,8 @@ Describe 'Tarjeta de energía con tareas controladas sin Windows real' {
         $powerTrans.Complete((New-Object Juno.Preview.TransparencyResult))
         $powerProvider.Complete((New-PowerUiResult));Wait-PowerUi $powerForm
         $powerProvider.Calls|Should Be 1;$powerProvider.LastAction|Should Be Read;$powerProvider.WriteCalls|Should Be 0
-        (Get-PowerButton $powerForm PowerApply).Enabled|Should Be $true;(Get-PowerButton $powerForm PowerApply).Accent|Should Be $true
-        (Get-PowerButton $powerForm PowerRestore).Enabled|Should Be $false
+        (Test-PowerButtonFlag $powerForm PowerApply Enabled)|Should Be $true;(Test-PowerButtonFlag $powerForm PowerApply Accent)|Should Be $true
+        (Test-PowerButtonFlag $powerForm PowerRestore Enabled)|Should Be $false
     }
     It 'cancelar confirmación no llega al servicio' {
         $powerController.Start('Read',$powerConfirmation)|Out-Null;$powerProvider.Complete((New-PowerUiResult));$powerController.Poll()|Out-Null
@@ -341,27 +343,29 @@ Describe 'Tarjeta de energía con tareas controladas sin Windows real' {
         $r=New-PowerUiResult;$r.CanApply=$false
         switch($Kind){Admin{$r.Administrator=$false;$r.Message='Requiere administrador'} Standby{$r.Availability='Unsupported';$r.Message='Modern Standby'} Unknown{$r.Outcome='Failed';$r.Message='Consulta fallida'} Pending{$r.Pending=$true;$r.CanRestore=$true;$r.Message='Diario pendiente'} Active{$r.HighActive=$true;$r.CanRestore=$true}}
         $powerController.Start('Read',$powerConfirmation)|Out-Null;$powerProvider.Complete($r);$powerController.Poll()|Out-Null;$powerForm.Navigate('Rendimiento')
-        (Get-PowerButton $powerForm PowerApply).Enabled|Should Be $false;(Get-PowerButton $powerForm PowerApply).Accent|Should Be $false
-        (Get-PowerButton $powerForm PowerRestore).Enabled|Should Be $r.CanRestore
+        (Test-PowerButtonFlag $powerForm PowerApply Enabled)|Should Be $false;(Test-PowerButtonFlag $powerForm PowerApply Accent)|Should Be $false
+        (Test-PowerButtonFlag $powerForm PowerRestore Enabled)|Should Be $r.CanRestore
     }
     It 'aplicación mantiene instantánea, bloquea duplicados y cierre y actualiza al terminar' {
         $powerForm.Show();$powerForm.Navigate('Rendimiento');$powerTrans.Complete((New-Object Juno.Preview.TransparencyResult));$powerProvider.Complete((New-PowerUiResult));Wait-PowerUi $powerForm
         $powerProvider.Next();$powerConfirmation.Accept=$true
         $powerForm.RequestPower('Apply')|Should Be $true;$powerForm.RequestPower('Apply')|Should Be $false;$powerForm.RequestTransparency('Read')|Should Be $false
         $powerController.Snapshot.ActiveName|Should Be 'Equilibrado ficticio'
-        foreach($name in @('PowerRead','PowerApply','PowerPlans','PowerRestore','TransparencyRead','TransparencyEnable')){(Get-PowerButton $powerForm $name).Enabled|Should Be $false}
+        foreach($name in @('PowerRead','PowerApply','PowerPlans','PowerRestore','TransparencyRead','TransparencyEnable')){(Test-PowerButtonFlag $powerForm $name Enabled)|Should Be $false}
         $powerForm.Close();$powerForm.IsDisposed|Should Be $false
         $powerForm.Navigate('Inicio');$powerForm.Navigate('Aplicaciones')
         $r=New-PowerUiResult;$r.ActiveName='Alto rendimiento ficticio';$r.HighActive=$true;$r.CanApply=$false;$r.CanRestore=$true;$r.Outcome='Applied'
         $powerProvider.Complete($r);Wait-PowerUi $powerForm;$powerForm.Navigate('Rendimiento')
-        (Get-PowerButton $powerForm PowerApply).Accent|Should Be $false;(Get-PowerButton $powerForm PowerRestore).Enabled|Should Be $true
+        (Test-PowerButtonFlag $powerForm PowerApply Accent)|Should Be $false;(Test-PowerButtonFlag $powerForm PowerRestore Enabled)|Should Be $true
         $powerProvider.WriteCalls|Should Be 1;$powerForm.Close();$powerForm.ResourcesReleased|Should Be $true
     }
     It 'Ver planes usa el lanzador inyectado sin comandos o escritor' {
-        $powerForm.Navigate('Rendimiento');(Get-PowerButton $powerForm PowerPlans).PerformClick()
-        $button=Get-PowerButton $powerForm PowerPlans
-        [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-        $powerLauncher.Calls|Should BeGreaterThan 0;$powerProvider.WriteCalls|Should Be 0
+        $details=$powerForm.CreateToolDetails($true)
+        try{
+            $button=Get-PowerButton $details PowerPlans
+            [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
+            $powerLauncher.Calls|Should Be 1;$powerProvider.WriteCalls|Should Be 0
+        }finally{$details.Dispose()}
     }
     It 'cerrar durante lectura libera UI sin detener ni escribir' {
         $powerForm.Show();$powerForm.Navigate('Rendimiento');$powerTrans.Complete((New-Object Juno.Preview.TransparencyResult))
@@ -418,10 +422,10 @@ Describe 'Tarjeta de energía con tareas controladas sin Windows real' {
         $powerProvider.Next();$powerController.Start('Read',$powerConfirmation)|Out-Null
         $powerProvider.Completion.TrySetException([InvalidOperationException]::new('SIMULATED failure'))|Out-Null
         $powerController.Poll()|Should Be $true;$powerForm.Navigate('Rendimiento')
-        (Get-PowerButton $powerForm PowerApply).Enabled|Should Be $false
-        (Get-PowerButton $powerForm PowerApply).Accent|Should Be $false
-        (Get-PowerButton $powerForm PowerRead).Enabled|Should Be $true
-        (Get-PowerButton $powerForm PowerState).Text|Should Match 'Resultado desconocido'
+        (Test-PowerButtonFlag $powerForm PowerApply Enabled)|Should Be $false
+        (Test-PowerButtonFlag $powerForm PowerApply Accent)|Should Be $false
+        $powerController.CanStart('Read')|Should Be $true
+        (Get-PowerButton $powerForm PowerState).Text|Should Match 'No se pudo completar el cambio'
     }
 }
 

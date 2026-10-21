@@ -54,6 +54,20 @@ namespace Juno.Preview
         private PowerAction action;
         private bool disposed;
         private bool deciding;
+        private string selectedGuid,selectedName,requestedGuid,requestedName;
+        public string RememberedGuid {get{return selectedGuid;}}
+        public bool HasRememberedSelection {get{return CanReuseSelection();}}
+        private bool CanReuseSelection()
+        {
+            return Snapshot.RequiresSelection&&Snapshot.CanApply&&SelectionIsValid();
+        }
+        private bool SelectionIsValid()
+        {
+            return selectedGuid!=null&&Snapshot.Administrator
+                &&Snapshot.ModernStandby==false&&!Snapshot.Pending&&!Snapshot.Historical
+                &&String.IsNullOrEmpty(Snapshot.BackupIssue)&&(Snapshot.Outcome=="Read"||Snapshot.Outcome=="Restored"||Snapshot.Outcome=="Applied")
+                &&Array.Exists(Snapshot.Choices,p=>String.Equals(p.Guid,selectedGuid,StringComparison.OrdinalIgnoreCase)&&p.Name==selectedName);
+        }
         public PowerResult Snapshot {get;private set;}
         public bool HasRequested {get;private set;}
         public bool IsConfigured {get{return !(service is UnavailablePowerService);}}
@@ -75,17 +89,17 @@ namespace Juno.Preview
             deciding=true;
             try{
                 if(requested==PowerAction.Apply&&Snapshot.RequiresSelection){
-                    target=selection==null?null:selection.Choose(Snapshot.Choices);
+                    target=CanReuseSelection()?selectedGuid:selection==null?null:selection.Choose(Snapshot.Choices);
                     if(String.IsNullOrWhiteSpace(target)){Snapshot.Message="Selección cancelada. No se inició ninguna escritura.";return false;}
                     Guid parsed;
                     if(!Guid.TryParse(target,out parsed)||!Array.Exists(Snapshot.Choices,p=>String.Equals(p.Guid,parsed.ToString(),StringComparison.OrdinalIgnoreCase))){Snapshot.Message="Selección inválida. Vuelve a consultar.";return false;}
                     target=parsed.ToString();create=false;
                 }
             bool write=requested!=PowerAction.Read;
-            string intent=requested==PowerAction.Restore?"Restaurar el GUID original del equipo.":create?"Crear y activar un nuevo plan desde la plantilla oficial. Solo se creará si no apareció un plan reutilizable.":target==null?"Activar el plan identificado existente, sin crear otro.":"Activar el plan elegido: "+Array.Find(Snapshot.Choices,p=>String.Equals(p.Guid,target,StringComparison.OrdinalIgnoreCase)).Name+". No se acredita equivalencia técnica por su nombre; no se editarán sus ajustes.";
-            if(write&&(confirmation==null||!confirmation.Confirm("JUNO · Plan de energía",
-                intent+
-                "\r\n\r\nRequiere administrador. Se conservarán el original y el diario Machine. No se eliminarán planes. Alto rendimiento puede aumentar consumo y temperatura y reducir la autonomía; no garantiza una mejora universal.\r\n\r\n¿Autorizar la operación?"))){Snapshot.Message="Solicitud cancelada. No se inició ninguna escritura.";return false;}
+            string intent=requested==PowerAction.Restore?"¿Querés restaurar el plan anterior?":create?"¿Querés crear y activar Alto rendimiento?":target==null?"¿Querés activar Alto rendimiento?":"¿Querés activar el plan elegido: "+Array.Find(Snapshot.Choices,p=>String.Equals(p.Guid,target,StringComparison.OrdinalIgnoreCase)).Name+"?";
+            if(write&&(confirmation==null||!confirmation.Confirm(requested==PowerAction.Restore?"JUNO · Restaurar plan anterior":create?"JUNO · Crear Alto rendimiento":"JUNO · Activar plan",
+                intent+(requested==PowerAction.Restore?"":"\r\n\r\nPuede aumentar el consumo de batería.")))){Snapshot.Message="Solicitud cancelada. No se inició ninguna escritura.";return false;}
+            requestedGuid=target;requestedName=target==null?null:Array.Find(Snapshot.Choices,p=>String.Equals(p.Guid,target,StringComparison.OrdinalIgnoreCase)).Name;
             action=requested;HasRequested=true;
             try{pending=service.ExecuteAsync(requested,write,target,create);if(pending==null)throw new InvalidOperationException();}
             catch(Exception){pending=Task.FromResult(PowerResult.Failure("No se pudo iniciar la operación."));}
@@ -98,6 +112,14 @@ namespace Juno.Preview
             try{Snapshot=pending.GetAwaiter().GetResult()??PowerResult.Failure("Respuesta vacía; vuelve a consultar.");}
             catch(Exception){Snapshot=PowerResult.Failure("Consulta u operación fallida. Resultado desconocido; conserva los respaldos y vuelve a consultar.");}
             finally{pending=null;}
+            // Solo recordar una selección explícita con resultado verificado. Nunca se persiste.
+            if(action==PowerAction.Apply&&Snapshot.Outcome=="Applied"&&requestedGuid!=null
+                &&String.Equals(Snapshot.ActiveGuid,requestedGuid,StringComparison.OrdinalIgnoreCase)&&!Snapshot.Pending&&String.IsNullOrEmpty(Snapshot.BackupIssue)){
+                selectedGuid=requestedGuid;selectedName=requestedName;
+            }
+            else if(Snapshot.Outcome=="Failed"||Snapshot.Outcome=="Conflict"||Snapshot.Outcome=="Busy"||Snapshot.Pending||Snapshot.Historical||!String.IsNullOrEmpty(Snapshot.BackupIssue)
+                ||!Snapshot.Administrator||Snapshot.ModernStandby!=false
+                ||(Snapshot.RequiresSelection&&!SelectionIsValid())){selectedGuid=null;selectedName=null;}
             return true;
         }
         public string Status {get{return IsBusy?(IsWriting?"Operación de energía en curso. Espera su verificación antes de cerrar.":"Consultando energía y respaldo… Puedes seguir navegando."):(Snapshot.Pending?"Operación pendiente de reconciliación. ":"")+Snapshot.Message;}}

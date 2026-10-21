@@ -18,16 +18,18 @@ namespace Juno.Preview
         {
             using(Form dialog=new Form())using(Font font=new Font("Segoe UI",10)){
                 dialog.Name="PowerSelection";dialog.Text="JUNO · Elegir plan existente";dialog.BackColor=Colors.Canvas;dialog.ForeColor=Colors.Text;dialog.Font=font;
-                dialog.StartPosition=FormStartPosition.CenterParent;dialog.Size=new Size(680,500);dialog.MinimumSize=new Size(460,360);dialog.ShowInTaskbar=false;dialog.MinimizeBox=false;dialog.MaximizeBox=false;dialog.Padding=new Padding(16);
-                Label note=new Label{Text="Elige un plan existente. Nombres iguales no acreditan ajustes equivalentes. Los identificadores se muestran en Detalles.",Dock=DockStyle.Top,Height=66,ForeColor=Colors.Text};
+                dialog.StartPosition=FormStartPosition.CenterParent;dialog.Size=new Size(540,330);dialog.MinimumSize=new Size(400,280);dialog.ShowInTaskbar=false;dialog.MinimizeBox=false;dialog.MaximizeBox=false;dialog.Padding=new Padding(16);
+                Label note=new Label{Text="Elegí el plan que querés utilizar.",Dock=DockStyle.Top,Height=34,ForeColor=Colors.Text};
                 ListBox list=new ListBox{Name="PowerPlanList",Dock=DockStyle.Fill,BackColor=Colors.Card,ForeColor=Colors.Text,BorderStyle=BorderStyle.FixedSingle,IntegralHeight=false};
                 foreach(PowerPlanChoice choice in choices){int count=0;foreach(PowerPlanChoice other in choices)if(other.Name==choice.Name)count++;int index=0;for(int i=0;i<list.Items.Count;i++)if(choices[i].Name==choice.Name)index++;list.Items.Add(choice.Name+(count>1?" · opción "+(index+1):""));}
-                TextBox details=new TextBox{Name="PowerPlanDetails",Dock=DockStyle.Bottom,Height=92,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,BackColor=Colors.Card,ForeColor=Colors.Muted,Text="Detalles: selecciona un plan para ver su identificador."};
+                TextBox details=new TextBox{Name="PowerPlanDetails",Dock=DockStyle.Bottom,Height=92,Visible=false,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,BackColor=Colors.Card,ForeColor=Colors.Muted,Text="Seleccioná un plan para ver su identificador."};
+                LinkLabel toggle=new LinkLabel{Name="SelectionDetails",Text="Ver detalles",Dock=DockStyle.Bottom,Height=28,LinkColor=Colors.Muted};
+                toggle.Click+=delegate{details.Visible=!details.Visible;toggle.Text=details.Visible?"Ocultar detalles":"Ver detalles";};
                 FlowLayoutPanel actions=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=50,FlowDirection=FlowDirection.RightToLeft,Padding=new Padding(0,10,0,0)};
                 PreviewButton cancel=new PreviewButton{Text="Cancelar",Secondary=true,Width=130,Height=36,Font=font,DialogResult=DialogResult.Cancel};
                 PreviewButton accept=new PreviewButton{Text="Elegir plan",Secondary=true,Width=145,Height=36,Font=font,Enabled=false,DialogResult=DialogResult.OK};
                 list.SelectedIndex=-1;list.SelectedIndexChanged+=delegate{accept.Enabled=list.SelectedIndex>=0;if(accept.Enabled){PowerPlanChoice choice=choices[list.SelectedIndex];details.Text="Detalles\r\nNombre: "+choice.Name+"\r\nIdentificador: "+choice.Guid+"\r\nLa elección autoriza activar este GUID; no modificar sus ajustes.";}};
-                actions.Controls.Add(cancel);actions.Controls.Add(accept);dialog.Controls.Add(list);dialog.Controls.Add(details);dialog.Controls.Add(actions);dialog.Controls.Add(note);dialog.AcceptButton=cancel;dialog.CancelButton=cancel;dialog.ActiveControl=cancel;
+                actions.Controls.Add(cancel);actions.Controls.Add(accept);dialog.Controls.Add(list);dialog.Controls.Add(details);dialog.Controls.Add(toggle);dialog.Controls.Add(actions);dialog.Controls.Add(note);dialog.AcceptButton=cancel;dialog.CancelButton=cancel;dialog.ActiveControl=cancel;
                 dialog.Shown+=delegate{Rectangle area=Screen.FromControl(dialog).WorkingArea;dialog.MinimumSize=new Size(Math.Min(dialog.MinimumSize.Width,area.Width-24),Math.Min(dialog.MinimumSize.Height,area.Height-24));dialog.Size=new Size(Math.Min(dialog.Width,area.Width-24),Math.Min(dialog.Height,area.Height-24));cancel.Focus();};
                 return dialog.ShowDialog(owner)==DialogResult.OK&&list.SelectedIndex>=0?choices[list.SelectedIndex].Guid:null;
             }
@@ -192,6 +194,18 @@ namespace Juno.Preview
         }
     }
 
+    internal class ToolActions : Panel
+    {
+        private readonly float scale;
+        public ToolActions(float factor){scale=factor;}
+        public override Size GetPreferredSize(Size proposedSize){return new Size(proposedSize.Width,(int)(36*scale)*(Controls.Count>1&&proposedSize.Width<300*scale?Controls.Count:1));}
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            bool vertical=Controls.Count>1&&ClientSize.Width<300*scale;int count=Math.Max(1,Controls.Count),gap=(int)(8*scale);
+            for(int i=0;i<Controls.Count;i++)Controls[i].SetBounds(vertical?0:i*(ClientSize.Width+gap)/count,vertical?i*(int)(36*scale):0,vertical?ClientSize.Width:(ClientSize.Width-gap*(count-1))/count,(int)(32*scale));
+            base.OnLayout(e);
+        }
+    }
     internal class Tile : Surface
     {
         public string Key {get;private set;}
@@ -207,7 +221,7 @@ namespace Juno.Preview
             detail=MakeLabel(text,normal,Colors.Muted);
             stack.Controls.Add(icon);stack.Controls.Add(title);
             if(displayValue!=null){value=MakeLabel(displayValue,large,Colors.Text);stack.Controls.Add(value);}
-            stack.Controls.Add(detail);
+            if(!String.IsNullOrEmpty(text))stack.Controls.Add(detail);
             if(tool){
                 Label state=MakeLabel(ToolStateText.Describe(ToolAvailability.PendingIntegration),normal,Colors.Amber);state.Name="ToolState";stack.Controls.Add(state);
                 PreviewButton action=new PreviewButton();action.Text="Sin conectar";action.Name="ToolAction";action.AccessibleDescription="Herramienta no conectada en este prototipo";action.Enabled=false;action.Font=normal;action.Height=(int)(40*scale);action.Dock=DockStyle.None;
@@ -513,28 +527,23 @@ namespace Juno.Preview
         }
         private void BuildTransparency(TileGrid grid)
         {
-            string reading=TransparencyController.StateText(transparency.Snapshot.State);
-            if(transparency.IsBusy&&transparency.HasRequested)reading+=" · Lectura sin actualizar";
-            Tile tile=new Tile("transparency","Transparencia","Ámbito: usuario actual (HKCU). El estado del Registro no garantiza el efecto visual.",normal,bold,metric,reading,false,scale);
-            Label state=Tile.MakeLabel(transparency.Status,normal,Colors.Amber);state.Name="TransparencyState";tile.AddContent(state);
-            AddTransparencyButton(tile,"TransparencyRead","Consultar estado",TransparencyAction.Read,false);
-            AddTransparencyButton(tile,"TransparencyDisable","Desactivar",TransparencyAction.Disable,IsTransparencyPrimary(TransparencyAction.Disable));
-            AddTransparencyButton(tile,"TransparencyEnable","Activar",TransparencyAction.Enable,IsTransparencyPrimary(TransparencyAction.Enable));
-            AddTransparencyButton(tile,"TransparencyRestore","Restaurar original",TransparencyAction.Restore,false);
-            grid.Controls.Add(tile);
+            TransparencyResult value=transparency.Snapshot;
+            Tile tile=new Tile("transparency","Transparencia","",normal,bold,metric,TransparencyController.StateText(value.State),false,scale);
+            Label state=Tile.MakeLabel(ToolPresentation.TransparencyMessage(transparency),normal,Colors.Muted);state.Name="TransparencyState";tile.AddContent(state);
+            if(value.State=="Enabled"||value.State=="Disabled"){
+                bool enable=value.State=="Disabled";
+                PreviewButton main=ToolButton(enable?"TransparencyEnable":"TransparencyDisable",enable?"Activar transparencia":"Desactivar transparencia",value.CanChange,!power.IsBusy&&transparency.CanStart(enable?TransparencyAction.Enable:TransparencyAction.Disable));
+                main.Click+=delegate{RequestTransparency(enable?TransparencyAction.Enable:TransparencyAction.Disable);};tile.AddContent(main);
+            }else{
+                PreviewButton read=ToolButton("TransparencyRead","Volver a consultar",false,!power.IsBusy&&transparency.CanStart(TransparencyAction.Read));
+                read.Click+=delegate{RequestTransparency(TransparencyAction.Read);};tile.AddContent(read);
+            }
+            ToolActions row=new ToolActions(scale);
+            if(value.CanRestore){PreviewButton restore=ToolButton("TransparencyRestore","Restaurar anterior",false,!power.IsBusy&&transparency.CanStart(TransparencyAction.Restore));restore.Click+=delegate{RequestTransparency(TransparencyAction.Restore);};row.Controls.Add(restore);}
+            PreviewButton details=ToolButton("TransparencyDetails","Ver detalles",false,true);details.Click+=delegate{ShowToolDetails(false);};row.Controls.Add(details);tile.AddContent(row);grid.Controls.Add(tile);
         }
-        private bool IsTransparencyPrimary(TransparencyAction action)
-        {
-            if(!transparency.Snapshot.CanChange)return false;
-            return (transparency.Snapshot.State=="Enabled"&&action==TransparencyAction.Disable)
-                ||(transparency.Snapshot.State=="Disabled"&&action==TransparencyAction.Enable);
-        }
-        private void AddTransparencyButton(Tile tile,string name,string text,TransparencyAction action,bool accent)
-        {
-            PreviewButton button=new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(40*scale),Enabled=!power.IsBusy&&transparency.CanStart(action)};
-            button.AccessibleDescription=accent?"Acción principal para el estado actual":"Acción secundaria de transparencia";
-            button.Click+=delegate{RequestTransparency(action);};tile.AddContent(button);
-        }
+        private PreviewButton ToolButton(string name,string text,bool accent,bool enabled)
+        {return new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(44*scale),Enabled=enabled};}
         private void RefreshTransparencyView()
         {
             if(IsDisposed||Disposing)return;
@@ -559,24 +568,38 @@ namespace Juno.Preview
         private void BuildPower(TileGrid grid)
         {
             PowerResult value=power.Snapshot;
-            string reading=value.ActiveName;
-            if(power.IsBusy)reading+=" · Lectura sin actualizar";
-            Tile tile=new Tile("power","Plan de energía","Alto rendimiento puede aumentar consumo y temperatura y reducir autonomía. No garantiza una mejora universal.",normal,bold,metric,reading,false,scale);
-            string availability=value.Availability=="Available"?"Disponible":value.Availability=="ChoiceRequired"?"Elegir un plan existente":value.Availability=="Missing"?"No identificado; creación con confirmación":value.Availability=="Unsupported"?"No compatible (Modern Standby)":"Sin determinar";
-            tile.AddContent(Tile.MakeLabel("Alto rendimiento: "+availability+"\nCambios: requieren administrador · "+(value.Administrator?"sesión elevada":"sesión sin elevación"),normal,Colors.Muted));
-            tile.AddContent(Tile.MakeLabel("Restauración: "+(value.CanRestore?"disponible":"no disponible"),normal,Colors.Muted));
-            Label state=Tile.MakeLabel(power.Status,normal,Colors.Amber);state.Name="PowerState";tile.AddContent(state);
-            AddPowerButton(tile,"PowerRead","Consultar estado",PowerAction.Read,false);
-            AddPowerButton(tile,"PowerApply",value.RequiresSelection?"Elegir plan existente…":value.RequiresCreation?"Crear Alto rendimiento…":"Activar Alto rendimiento",PowerAction.Apply,value.CanApply&&!value.HighActive&&!value.Pending);
-            PreviewButton plans=new PreviewButton{Name="PowerPlans",Text="Ver planes disponibles",Font=normal,Secondary=true,Height=(int)(40*scale),Enabled=!power.IsBusy&&!transparency.IsBusy};
-            plans.Click+=delegate{try{powerPlans.Open();}catch(Exception){state.Text="No se pudo abrir Opciones de energía de Windows.";}};tile.AddContent(plans);
-            AddPowerButton(tile,"PowerRestore","Restaurar plan original",PowerAction.Restore,false);
-            grid.Controls.Add(tile);
+            string reading=System.Text.RegularExpressions.Regex.Replace(value.ActiveName??"Estado desconocido",@"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}","Plan actual");
+            Tile tile=new Tile("power","Plan de energía","",normal,bold,metric,reading,false,scale);
+            Label state=Tile.MakeLabel(ToolPresentation.PowerMessage(power),normal,Colors.Muted);state.Name="PowerState";tile.AddContent(state);
+            bool active=value.HighActive||value.SelectionActive;
+            if(active&&value.CanRestore){
+                PreviewButton restore=ToolButton("PowerRestore","Restaurar plan anterior",true,!transparency.IsBusy&&power.CanStart(PowerAction.Restore));
+                restore.Click+=delegate{RequestPower(PowerAction.Restore);};tile.AddContent(restore);
+            }else if(!active){
+                PreviewButton apply=ToolButton("PowerApply",value.RequiresCreation?"Crear Alto rendimiento…":value.RequiresSelection?(power.HasRememberedSelection?"Activar plan elegido":"Elegir plan existente…"):"Activar Alto rendimiento",value.CanApply&&!value.Pending,!transparency.IsBusy&&power.CanStart(PowerAction.Apply));
+                apply.Click+=delegate{RequestPower(PowerAction.Apply);};tile.AddContent(apply);
+            }
+            ToolActions row=new ToolActions(scale);
+            if(!active&&value.CanRestore){PreviewButton restore=ToolButton("PowerRestore","Restaurar anterior",false,!transparency.IsBusy&&power.CanStart(PowerAction.Restore));restore.Click+=delegate{RequestPower(PowerAction.Restore);};row.Controls.Add(restore);}
+            PreviewButton details=ToolButton("PowerDetails","Ver detalles",false,true);details.Click+=delegate{ShowToolDetails(true);};row.Controls.Add(details);tile.AddContent(row);grid.Controls.Add(tile);
         }
-        private void AddPowerButton(Tile tile,string name,string text,PowerAction action,bool accent)
+        public Form CreateToolDetails(bool energy)
         {
-            PreviewButton button=new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(40*scale),Enabled=!transparency.IsBusy&&power.CanStart(action)};
-            button.Click+=delegate{RequestPower(action);};tile.AddContent(button);
+            Form dialog=new Form{Name=energy?"PowerDetailsDialog":"TransparencyDetailsDialog",Text=energy?"JUNO · Detalles de energía":"JUNO · Detalles de transparencia",StartPosition=FormStartPosition.CenterParent,Size=new Size(640,460),MinimumSize=new Size(400,300),ShowInTaskbar=false,MinimizeBox=false,MaximizeBox=false,BackColor=Colors.Canvas,ForeColor=Colors.Text,Font=normal,Padding=new Padding(16)};
+            TextBox text=new TextBox{Name="TechnicalDetails",Dock=DockStyle.Fill,Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,BackColor=Colors.Card,ForeColor=Colors.Text,Text=energy?ToolPresentation.PowerDetails(power):ToolPresentation.TransparencyDetails(transparency)};
+            FlowLayoutPanel actions=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=100,FlowDirection=FlowDirection.RightToLeft,WrapContents=true,Padding=new Padding(0,10,0,0)};
+            PreviewButton close=ToolButton("CloseDetails","Cerrar",false,true);close.Width=105;close.Height=34;close.DialogResult=DialogResult.Cancel;actions.Controls.Add(close);
+            PreviewButton refresh=ToolButton(energy?"PowerRead":"TransparencyRead","Actualizar",false,!power.IsBusy&&!transparency.IsBusy);refresh.Width=110;refresh.Height=34;refresh.DialogResult=DialogResult.Retry;actions.Controls.Add(refresh);
+            if(energy){PreviewButton plans=ToolButton("PowerPlans","Planes de Windows",false,!power.IsBusy&&!transparency.IsBusy);plans.Width=180;plans.Height=34;plans.Click+=delegate{if(power.IsBusy||transparency.IsBusy)return;try{powerPlans.Open();}catch(Exception){text.AppendText("\r\nNo se pudo abrir Opciones de energía de Windows.");}};actions.Controls.Add(plans);}
+            dialog.Controls.Add(text);dialog.Controls.Add(actions);dialog.AcceptButton=close;dialog.CancelButton=close;
+            dialog.Shown+=delegate{text.SelectionStart=0;text.SelectionLength=0;close.Focus();};
+            return dialog;
+        }
+        private void ShowToolDetails(bool energy)
+        {
+            using(Form dialog=CreateToolDetails(energy)){
+                if(dialog.ShowDialog(this)==DialogResult.Retry){if(energy)RequestPower(PowerAction.Read);else RequestTransparency(TransparencyAction.Read);}
+            }
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {

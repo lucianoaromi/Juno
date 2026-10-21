@@ -67,7 +67,7 @@ namespace Juno.Preview
             bool write=requested!=TransparencyAction.Read;
             if(write){
                 string verb=requested==TransparencyAction.Restore?"restaurar el original":requested==TransparencyAction.Enable?"activar la transparencia":"desactivar la transparencia";
-                if(confirmation==null||!confirmation.Confirm("JUNO · Transparencia","Se solicita "+verb+" para este usuario.\r\n\r\nJUNO conservará el original, incluida su ausencia, y verificará el Registro. El cambio visual puede requerir cerrar sesión manualmente. No se reinicia Explorer.\r\n\r\n¿Autorizar la operación?")){
+                if(confirmation==null||!confirmation.Confirm("JUNO · Transparencia","¿Querés "+verb+"?\r\n\r\nEl efecto visual puede requerir cerrar sesión.")){
                     Snapshot.Message="Solicitud cancelada. No se inició ninguna escritura.";return false;
                 }
             }

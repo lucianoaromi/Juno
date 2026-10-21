@@ -19,7 +19,8 @@ namespace Juno.Preview.Testing
     {
         public bool Accept;
         public int Calls;
-        public bool Confirm(string title,string message){Calls++;return Accept;}
+        public string LastTitle,LastMessage;
+        public bool Confirm(string title,string message){Calls++;LastTitle=title;LastMessage=message;return Accept;}
     }
     public sealed class PumpingConfirmation : ITransparencyConfirmation
     {

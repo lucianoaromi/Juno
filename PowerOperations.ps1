@@ -53,6 +53,8 @@ function Resolve-JunoPowerTarget($inventory,$backup,[string]$active,[string]$sel
         return [pscustomobject]@{Guid=$selected;Create=$false;NeedsSelection=$false;Already=($active -ieq $selected);High=$high;Choices=@()}
     }
     if($high){return [pscustomobject]@{Guid=$active;Create=$false;NeedsSelection=$false;Already=$true;High=$true;Choices=@()}}
+    # El GUID oficial tiene identidad inequívoca, incluso junto a planes personalizados.
+    if($ids -contains $script:HighPerformanceGuid){return [pscustomobject]@{Guid=$script:HighPerformanceGuid;Create=$false;NeedsSelection=$false;Already=$false;High=$false;Choices=@()}}
     # Un nombre no acredita equivalencia. Todo GUID personalizado es una posible reutilización
     # que exige elección explícita y que impide crear otra copia automáticamente.
     $choices=@($inventory|Where-Object{$_.Guid -notin @('381b4222-f694-41f0-9685-ff5bb260df2e','a1841308-3541-4fab-bc81-f71556f20b4a')})
