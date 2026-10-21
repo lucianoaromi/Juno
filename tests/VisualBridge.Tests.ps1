@@ -3,7 +3,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $visualBridgeRoot=Split-Path $PSScriptRoot -Parent
 if(-not ('Juno.Preview.Testing.ControlledVisual' -as [type])){
-    $files=@(Get-ChildItem (Join-Path $visualBridgeRoot 'ui') -Filter *.cs|ForEach-Object{$_.FullName})+@('Dashboard.TestSupport.cs','Transparency.TestSupport.cs','Power.TestSupport.cs','Visual.TestSupport.cs'|ForEach-Object{Join-Path $PSScriptRoot $_})
+    $files=@(Get-ChildItem (Join-Path $visualBridgeRoot 'ui') -Filter *.cs|ForEach-Object{$_.FullName})+@('Dashboard.TestSupport.cs','Transparency.TestSupport.cs','Power.TestSupport.cs','Visual.TestSupport.cs','Startup.TestSupport.cs'|ForEach-Object{Join-Path $PSScriptRoot $_})
     Add-Type -Path $files -ReferencedAssemblies @('System.Windows.Forms','System.Drawing','System.Management','System.Web.Extensions',[Management.Automation.PSObject].Assembly.Location)
 }
 . (Join-Path $visualBridgeRoot 'BackupStore.ps1')

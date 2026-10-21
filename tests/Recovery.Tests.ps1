@@ -8,7 +8,7 @@ $recoveryRoot = Split-Path $PSScriptRoot -Parent
 function Get-JunoIdentity { [pscustomobject]@{Sid='TEST-SID';Machine='11111111-2222-3333-4444-555555555555'} }
 function Test-JunoAdmin { return $false }
 foreach ($spec in @(
-    @{ File='Inicio.ps1'; Names=@('Get-StartupFlag','Get-StartupBackup','Save-StartupBackup','Get-StartupApprovalSnapshot','Test-StartupApprovalSnapshot','Initialize-StartupTransaction','Sync-StartupTransaction','Write-StartupTransaction','Set-StartupState','Restore-StartupState') },
+    @{ File='StartupOperations.ps1'; Names=@('Get-StartupFlag','Get-StartupBackup','Save-StartupBackup','Get-StartupApprovalSnapshot','Test-StartupApprovalSnapshot','Initialize-StartupTransaction','Sync-StartupTransaction','Write-StartupTransaction','Set-StartupState','Restore-StartupState') },
     @{ File='PermisosUsuario.ps1'; Names=@('Get-BPUBackup','Save-BPUBackup','Test-BPUValueSnapshot','Initialize-BPUTransaction','Test-BPUApplyPending','Sync-BPUTransaction','Set-BPURegistryValue','Write-BPUTransactionValue','Assert-BPUApplySupported','Disable-BPUApps','Restore-BPUApps') }
 )) {
     $tokens=$null; $parseErrors=$null

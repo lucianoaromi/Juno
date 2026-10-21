@@ -17,7 +17,7 @@ function Convert-RegressionUi([string]$source) {
     $source=$source.Replace('[void]$dialog.ShowDialog($parent)','Invoke-RegressionWindow $dialog').Replace('[void]$dlg.ShowDialog($parent)','Invoke-RegressionWindow $dlg')
     return $source
 }
-foreach($file in @('PowerOperations.ps1','TransparencyOperations.ps1','VisualEffectsOperations.ps1','Juno.ps1','Inicio.ps1','SegundoPlano.ps1','Discos.ps1','Limpieza.ps1','PermisosSegundoPlano.ps1')){
+foreach($file in @('PowerOperations.ps1','TransparencyOperations.ps1','VisualEffectsOperations.ps1','Juno.ps1','StartupOperations.ps1','Inicio.ps1','SegundoPlano.ps1','Discos.ps1','Limpieza.ps1','PermisosSegundoPlano.ps1')){
     $t=$null;$e=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $regressionRoot $file),[ref]$t,[ref]$e)
     foreach($node in $ast.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)){
         . ([scriptblock]::Create((Convert-RegressionUi $node.Extent.Text)))
@@ -268,8 +268,8 @@ Describe 'Herramientas nativas y carga de dependencias' {
     }
     It 'todos los archivos cargados existen y el mutex precede a las consultas de UI' {
         $source=[IO.File]::ReadAllText((Join-Path $regressionRoot 'Juno.ps1'))
-        $dependencies=$source+[IO.File]::ReadAllText((Join-Path $regressionRoot 'TransparencyOperations.ps1'))
-        foreach($file in @('PowerOperations.ps1','TransparencyOperations.ps1','VisualEffectsOperations.ps1','VisualInterop.ps1','UiSupport.ps1','BackupStore.ps1','RecoveryOperations.ps1','BackgroundInventory.ps1','Inicio.ps1','Limpieza.ps1','Discos.ps1','SegundoPlano.ps1','PermisosUsuario.ps1','PermisosSegundoPlano.ps1')){
+        $dependencies=$source+[IO.File]::ReadAllText((Join-Path $regressionRoot 'Inicio.ps1'))+[IO.File]::ReadAllText((Join-Path $regressionRoot 'TransparencyOperations.ps1'))
+        foreach($file in @('PowerOperations.ps1','TransparencyOperations.ps1','VisualEffectsOperations.ps1','VisualInterop.ps1','UiSupport.ps1','BackupStore.ps1','RecoveryOperations.ps1','BackgroundInventory.ps1','StartupOperations.ps1','Inicio.ps1','Limpieza.ps1','Discos.ps1','SegundoPlano.ps1','PermisosUsuario.ps1','PermisosSegundoPlano.ps1')){
             [IO.File]::Exists((Join-Path $regressionRoot $file))|Should Be $true
             $dependencies.Contains("'"+$file+"'")|Should Be $true
         }
@@ -279,7 +279,7 @@ Describe 'Herramientas nativas y carga de dependencias' {
     }
     It 'bootstrap completo carga modulos desde una ruta con espacios sin Registro ni ventana reales' {
         $folder=Join-Path $TestDrive 'JUNO con espacios';[void][IO.Directory]::CreateDirectory($folder)
-        foreach($file in @('PowerOperations.ps1','TransparencyOperations.ps1','VisualEffectsOperations.ps1','VisualInterop.ps1','UiSupport.ps1','BackupStore.ps1','RecoveryOperations.ps1','BackgroundInventory.ps1','Inicio.ps1','Limpieza.ps1','Discos.ps1','SegundoPlano.ps1','PermisosUsuario.ps1','PermisosSegundoPlano.ps1')){
+        foreach($file in @('PowerOperations.ps1','TransparencyOperations.ps1','VisualEffectsOperations.ps1','VisualInterop.ps1','UiSupport.ps1','BackupStore.ps1','RecoveryOperations.ps1','BackgroundInventory.ps1','StartupOperations.ps1','Inicio.ps1','Limpieza.ps1','Discos.ps1','SegundoPlano.ps1','PermisosUsuario.ps1','PermisosSegundoPlano.ps1')){
             [IO.File]::Copy((Join-Path $regressionRoot $file),(Join-Path $folder $file))
         }
         $source=[IO.File]::ReadAllText((Join-Path $regressionRoot 'Juno.ps1'))

@@ -273,7 +273,7 @@ namespace Juno.Preview
 
     public class ShellForm : Form
     {
-        public const string PreviewVersion="0.9 · Etapa 3B";
+        public const string PreviewVersion="0.9 · Etapa 3D";
         public const string RepositoryUrl="https://github.com/lucianoaromi/Juno";
         public static readonly string[] Sections={"Inicio","Rendimiento","Aplicaciones","Mantenimiento","Restauración","Acerca de"};
         public string SelectedSection {get;private set;}
@@ -310,6 +310,13 @@ namespace Juno.Preview
         private readonly IVisualSettingsLauncher visualSettings;
         private string visualWindowsFailure,visualWindowsDiagnostic;
         public VisualController Visual {get{return visual;}}
+        private readonly StartupController startup;
+        private readonly IStartupSettingsLauncher startupSettings;
+        private readonly Timer startupTimer;
+        private bool reviewingStartup;
+        private bool requestingTool;
+        private string startupWindowsDiagnostic;
+        public StartupController Startup {get{return startup;}}
 
         public ShellForm(string assetRoot):this(assetRoot,new DashboardController(new UnavailableDashboardQuery())){}
         public ShellForm(string assetRoot,DashboardController controller):this(assetRoot,controller,new TransparencyController(new UnavailableTransparencyService()),null){}
@@ -322,6 +329,8 @@ namespace Juno.Preview
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects)
             :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,null){}
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings)
+            :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,settings,new StartupController(new UnavailableStartupService()),null){}
+        public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings)
         {
             if(controller==null)throw new ArgumentNullException("controller");dashboard=controller;
             if(integration==null)throw new ArgumentNullException("integration");transparency=integration;
@@ -331,6 +340,19 @@ namespace Juno.Preview
             powerSelection=selection??new PowerPlanSelectionDialog(this);
             if(effects==null)throw new ArgumentNullException("effects");visual=effects;
             visualSettings=settings??new WindowsVisualSettingsLauncher(assetRoot);
+            if(launchItems==null)throw new ArgumentNullException("launchItems");startup=launchItems;
+            startupSettings=launchSettings??new WindowsStartupSettingsLauncher();
+            startupTimer=new Timer();startupTimer.Interval=100;
+            startupTimer.Tick+=delegate{
+                TransparencyReview review=startup.PendingReview;
+                if(review!=null&&!reviewingStartup){
+                    bool allowed=false;reviewingStartup=true;startupTimer.Stop();
+                    try{allowed=transparencyConfirmation.Confirm("JUNO · Revisar recuperación de inicio",review.Message);}
+                    finally{review.Answer(allowed);reviewingStartup=false;if(startup.IsBusy)startupTimer.Start();}
+                }
+                if(startup.Poll())RefreshTransparencyView();
+                if(!startup.IsBusy)startupTimer.Stop();
+            };
             visualTimer=new Timer();visualTimer.Interval=100;
             visualTimer.Tick+=delegate{
                 TransparencyReview review=visual.PendingReview;
@@ -407,7 +429,7 @@ namespace Juno.Preview
                 string destination=section;button.Click+=delegate{Navigate(destination);};
                 navigation.Add(section,button);sidebar.Controls.Add(button);
             }
-            Label notice=Tile.MakeLabel("VISTA PREVIA\nEnergía y transparencia",small,Colors.Muted);notice.Name="NavNotice";sidebar.Controls.Add(notice);
+            Label notice=Tile.MakeLabel("VISTA PREVIA\nInicio, energía y apariencia",small,Colors.Muted);notice.Name="NavNotice";sidebar.Controls.Add(notice);
         }
         private void BuildHeader()
         {
@@ -437,7 +459,7 @@ namespace Juno.Preview
             SelectedSection=section;breadcrumb.Text="ESPACIO DE TRABAJO  /  "+section;
             foreach(KeyValuePair<string,PreviewButton> pair in navigation){pair.Value.Selected=pair.Key==section;pair.Value.AccessibleDescription=pair.Value.Selected?"Sección seleccionada":"Ir a "+pair.Key;pair.Value.Invalidate();}
             status.Text=ToolsStatus;
-            header.Controls["InformationBadge"].Text=section=="Inicio"?"●  LECTURA DEL SISTEMA":section=="Rendimiento"?"●  AJUSTES DE RENDIMIENTO":"●  HERRAMIENTAS SIN CONECTAR";
+            header.Controls["InformationBadge"].Text=section=="Inicio"?"●  LECTURA DEL SISTEMA":section=="Rendimiento"?"●  AJUSTES DE RENDIMIENTO":section=="Aplicaciones"?"●  PROGRAMAS DE INICIO":"●  HERRAMIENTAS SIN CONECTAR";
             switch(section){
                 case "Inicio":BuildHome();break;
                 case "Rendimiento":BuildPerformance();break;
@@ -450,6 +472,7 @@ namespace Juno.Preview
             if(section=="Rendimiento"&&Visible&&!transparency.HasRequested)RequestTransparency(TransparencyAction.Read);
             if(section=="Rendimiento"&&Visible&&power.IsConfigured&&!power.HasRequested&&!transparency.IsBusy)RequestPower(PowerAction.Read);
             if(section=="Rendimiento"&&Visible&&visual.IsConfigured&&!visual.HasRequested&&!transparency.IsBusy&&!power.IsBusy)RequestVisual(VisualAction.Read);
+            if(section=="Aplicaciones"&&Visible&&startup.IsConfigured&&!startup.HasRequested)RequestStartup(StartupAction.Read,null);
         }
         private void BuildHome()
         {
@@ -488,7 +511,7 @@ namespace Juno.Preview
         {
             page.Controls.Add(Intro("APLICACIONES","Cada aplicación, en contexto.","Distingue el inicio automático, los permisos de segundo plano y los procesos activos."));
             TileGrid grid=Grid(2);
-            grid.Controls.Add(Tool("Aplicaciones","Programas de inicio","Revisar las entradas de inicio y sus estados, conservando sus originales."));
+            BuildStartup();
             grid.Controls.Add(Tool("Aplicaciones","Permisos de segundo plano","Mostrar capacidades y evidencia según edición de Windows y tipo de aplicación."));
             grid.Controls.Add(Tool("cpu","Procesos activos","Explorar una instantánea de procesos. Cerrar un proceso no cambia sus permisos."));page.Controls.Add(grid);
         }
@@ -499,12 +522,66 @@ namespace Juno.Preview
             grid.Controls.Add(Tool("Mantenimiento","Limpieza","Espacio reservado para el análisis de temporales y la revisión de limpieza en Windows."));
             grid.Controls.Add(Tool("disk","Diagnóstico SSD / HDD","Espacio reservado para unidades, estado de Windows e información de TRIM."));page.Controls.Add(grid);
         }
+        private bool StartupBlocked {get{return requestingTool||startup.IsBusy||transparency.IsBusy||power.IsBusy||visual.IsBusy||reviewingStartup||reviewingTransparency||reviewingPower||reviewingVisual;}}
+        private void BuildStartup()
+        {
+            Tile tile=new Tile("startup","PROGRAMAS DE INICIO","Elegí qué aplicaciones pueden iniciarse automáticamente con Windows.",normal,bold,metric,null,false,scale);
+            Label state=Tile.MakeLabel(startup.Status,normal,Colors.Muted);state.Name="StartupState";tile.AddContent(state);
+            if(!startup.HasRequested&&!startup.IsBusy){tile.AddContent(Tile.MakeLabel("Actualizá la lista para consultar las entradas disponibles.",small,Colors.Muted));}
+            else if(startup.Snapshot.Entries.Length==0&&!startup.IsBusy&&startup.Snapshot.Outcome=="Read"){tile.AddContent(Tile.MakeLabel("No se detectaron entradas clásicas administrables.",normal,Colors.Muted));}
+            int index=0;
+            if(startup.Snapshot.Entries.Length>0)tile.AddContent(new StartupListRow(scale,small));
+            foreach(StartupEntry entry in startup.Snapshot.Entries){
+                StartupEntry selected=entry;
+                var row=new StartupListRow(entry,index++,scale,normal,StartupBlocked,
+                    ()=>RequestStartup(selected.State=="Enabled"?StartupAction.Disable:StartupAction.Enable,selected.Id),
+                    ()=>ShowStartupMessage(selected.Reason));
+                tile.AddContent(row);
+            }
+            VStack actions=new VStack{Gap=(int)(8*scale)};
+            var refresh=ToolButton("StartupRead",startup.IsBusy?"Consultando…":"Actualizar lista",false,!StartupBlocked);refresh.Click+=delegate{RequestStartup(StartupAction.Read,null);};actions.Controls.Add(refresh);
+            var windows=ToolButton("StartupWindows","Configurar en Windows",false,!StartupBlocked);windows.Click+=delegate{OpenStartupWindows();};actions.Controls.Add(windows);tile.AddContent(actions);
+            if(startup.Snapshot.CanRestore){var restore=ToolButton("StartupRestore","Restaurar cambios",false,!StartupBlocked);restore.Click+=delegate{RequestStartup(StartupAction.Restore,null);};tile.AddContent(restore);}
+            var details=ToolButton("StartupDetails","Ver detalles",false,!StartupBlocked);details.Click+=delegate{using(Form dialog=CreateStartupDetails()){dialog.ShowDialog(this);}};tile.AddContent(details);
+            page.Controls.Add(tile);
+        }
+        public bool RequestStartup(StartupAction action,string id)
+        {
+            if(StartupBlocked)return false;
+            bool started;requestingTool=true;try{started=startup.Start(action,id,transparencyConfirmation);}finally{requestingTool=false;}
+            RefreshTransparencyView();if(started)startupTimer.Start();return started;
+        }
+        private void RefreshStartupView()
+        {
+            if(IsDisposed||Disposing)return;
+            if(SelectedSection=="Aplicaciones"){
+                int scroll=-viewport.AutoScrollPosition.Y;
+                while(page.Controls.Count>0){Control old=page.Controls[0];page.Controls.Remove(old);old.Dispose();}
+                BuildApps();LayoutPage();viewport.AutoScrollPosition=new Point(0,scroll);
+            }
+            status.Text=ToolsStatus;
+        }
+        private void ShowStartupMessage(string message)
+        {Control[] states=Controls.Find("StartupState",true);if(states.Length==1)states[0].Text=message;LayoutPage();}
+        private void OpenStartupWindows()
+        {
+            if(StartupBlocked)return;
+            try{startupSettings.Open();ShowStartupMessage("Actualizá la lista después de cambiar opciones en Windows.");}
+            catch(Exception error){startupWindowsDiagnostic=error.ToString();ShowStartupMessage("No se pudo abrir la configuración de inicio de Windows.");}
+        }
+        public Form CreateStartupDetails()
+        {
+            Form dialog=new Form{Name="StartupDetailsDialog",Text="JUNO · Diagnóstico de inicio",StartPosition=FormStartPosition.CenterParent,Size=new Size(640,460),MinimumSize=new Size(400,300),ShowInTaskbar=false,MinimizeBox=false,MaximizeBox=false,BackColor=Colors.Canvas,ForeColor=Colors.Text,Font=normal,Padding=new Padding(16)};
+            TextBox text=new TextBox{Name="TechnicalDetails",Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,BackColor=Colors.Card,ForeColor=Colors.Text,Text=startup.Snapshot.Details+"\r\n"+startupWindowsDiagnostic};
+            PreviewButton close=ToolButton("CloseDetails","Cerrar",false,true);close.Dock=DockStyle.Bottom;close.DialogResult=DialogResult.Cancel;
+            dialog.Controls.Add(text);dialog.Controls.Add(close);dialog.AcceptButton=close;dialog.CancelButton=close;return dialog;
+        }
         private void BuildRecovery()
         {
             page.Controls.Add(Intro("RESTAURACIÓN","Volver, con claridad.","La restauración general aún no está integrada. Energía y transparencia ofrecen su propia restauración desde Rendimiento."));
             TileGrid grid=Grid(2);
-            grid.Controls.Add(Tool("Restauración","Ajustes generales","Efectos visuales sigue sin conectar. Restaura energía o transparencia desde su tarjeta en Rendimiento."));
-            grid.Controls.Add(Tool("Restauración","Inicio y permisos","Las recuperaciones de inicio y segundo plano permanecerán en su ámbito correspondiente."));
+            grid.Controls.Add(Tool("Restauración","Ajustes generales","Restaurá energía, transparencia o efectos visuales desde su tarjeta en Rendimiento."));
+            grid.Controls.Add(Tool("Restauración","Inicio y permisos","Restaurá los cambios de inicio desde Aplicaciones. Segundo plano sigue sin conectar."));
             grid.Controls.Add(Tool("Restauración","Configuración TRIM","La restauración de TRIM seguirá separada del mantenimiento de discos."));
             grid.Controls.Add(new Tile("Acerca de","Respaldos existentes","Esta sección no ofrece recuperación general. La tarjeta Transparencia consulta y conserva sus originales mediante el almacén estable.",normal,bold,metric,null,false,scale));page.Controls.Add(grid);
         }
@@ -513,11 +590,11 @@ namespace Juno.Preview
             page.Controls.Add(Intro("ACERCA DE","JUNO, una nueva etapa.","Herramientas para comprender y gestionar Windows con decisiones explícitas."));
             TileGrid grid=Grid(2);
             grid.Controls.Add(new Tile("Acerca de","JUNO "+PreviewVersion,"Dashboard de solo lectura para Windows 10 y Windows 11. PowerShell 5.1, Windows Forms y .NET Framework.",normal,bold,metric,null,false,scale));
-            grid.Controls.Add(new Tile("Acerca de","Diseñado para integrar","Energía y transparencia utilizan el motor estable. Las demás herramientas siguen desconectadas en esta interfaz.",normal,bold,metric,null,false,scale));page.Controls.Add(grid);
+            grid.Controls.Add(new Tile("Acerca de","Diseñado para integrar","Energía, transparencia, efectos visuales e inicio utilizan sus motores estables. Las herramientas pendientes se muestran sin conectar.",normal,bold,metric,null,false,scale));page.Controls.Add(grid);
             VStack project=new VStack{Gap=(int)(12*scale)};project.Controls.Add(TextLabel("PROYECTO ABIERTO",small,Colors.Amber));
             LinkLabel link=new LinkLabel{Text="github.com/lucianoaromi/Juno ↗",AutoSize=true,Font=bold,LinkColor=Colors.Amber,ActiveLinkColor=Colors.Text,VisitedLinkColor=Colors.Amber,Name="GitHub",AccessibleDescription=RepositoryUrl};
             link.LinkClicked+=delegate{try{Process.Start(new ProcessStartInfo(RepositoryUrl){UseShellExecute=true});}catch(Exception){status.Text="No se pudo abrir el navegador. Enlace: "+RepositoryUrl;}};
-            project.Controls.Add(link);project.Controls.Add(TextLabel("Integración inicial · Etapa 3B\nEnergía y transparencia solicitan confirmación antes de cambiar ajustes.",normal,Colors.Muted));page.Controls.Add(project);
+            project.Controls.Add(link);project.Controls.Add(TextLabel("Integración de inicio · Etapa 3D\nLas herramientas solicitan confirmación antes de cambiar ajustes.",normal,Colors.Muted));page.Controls.Add(project);
         }
         protected override void OnLayout(LayoutEventArgs e)
         {
@@ -544,8 +621,9 @@ namespace Juno.Preview
 
         public bool RequestTransparency(TransparencyAction action)
         {
+            if(requestingTool||startup.IsBusy||reviewingStartup)return false;
             if(power.IsBusy||reviewingPower||visual.IsBusy||reviewingVisual)return false;
-            bool started=transparency.Start(action,transparencyConfirmation);
+            bool started;requestingTool=true;try{started=transparency.Start(action,transparencyConfirmation);}finally{requestingTool=false;}
             RefreshTransparencyView();
             if(started)transparencyTimer.Start();
             return started;
@@ -568,10 +646,11 @@ namespace Juno.Preview
             PreviewButton details=ToolButton("TransparencyDetails","Ver detalles",false,true);details.Click+=delegate{ShowToolDetails(false);};row.Controls.Add(details);tile.AddContent(row);grid.Controls.Add(tile);
         }
         private PreviewButton ToolButton(string name,string text,bool accent,bool enabled)
-        {return new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(44*scale),Enabled=enabled};}
+        {return new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(44*scale),Enabled=enabled&&!startup.IsBusy&&!reviewingStartup};}
         private void RefreshTransparencyView()
         {
             if(IsDisposed||Disposing)return;
+            if(SelectedSection=="Aplicaciones")RefreshStartupView();
             if(SelectedSection=="Rendimiento"){
                 int scroll=-viewport.AutoScrollPosition.Y;
                 while(page.Controls.Count>0){Control old=page.Controls[0];page.Controls.Remove(old);old.Dispose();}
@@ -581,12 +660,14 @@ namespace Juno.Preview
             // Lecturas iniciales secuenciales: ambos servicios comparten el mismo mutex.
             if(SelectedSection=="Rendimiento"&&Visible&&power.IsConfigured&&!power.HasRequested&&!transparency.IsBusy)RequestPower(PowerAction.Read);
             if(SelectedSection=="Rendimiento"&&Visible&&visual.IsConfigured&&!visual.HasRequested&&!transparency.IsBusy&&!power.IsBusy)RequestVisual(VisualAction.Read);
+            if(SelectedSection=="Aplicaciones"&&Visible&&startup.IsConfigured&&!startup.HasRequested)RequestStartup(StartupAction.Read,null);
         }
-        private string ToolsStatus {get{return visual.IsBusy?"Efectos visuales · "+visual.Status:power.IsBusy?"Energía · "+power.Status:transparency.IsBusy?"Transparencia · "+transparency.Status:"Dashboard de solo lectura · Energía, efectos visuales y transparencia integrados";}}
+        private string ToolsStatus {get{return startup.IsBusy?"Programas de inicio · "+startup.Status:visual.IsBusy?"Efectos visuales · "+visual.Status:power.IsBusy?"Energía · "+power.Status:transparency.IsBusy?"Transparencia · "+transparency.Status:"Dashboard de solo lectura · Energía, efectos visuales, transparencia e inicio integrados";}}
         public bool RequestPower(PowerAction action)
         {
+            if(requestingTool||startup.IsBusy||reviewingStartup)return false;
             if(transparency.IsBusy||reviewingTransparency||visual.IsBusy||reviewingVisual)return false;
-            bool started=power.Start(action,transparencyConfirmation,powerSelection);
+            bool started;requestingTool=true;try{started=power.Start(action,transparencyConfirmation,powerSelection);}finally{requestingTool=false;}
             RefreshTransparencyView();
             if(started)powerTimer.Start();
             return started;
@@ -629,16 +710,17 @@ namespace Juno.Preview
         }
         public bool RequestVisual(VisualAction action)
         {
+            if(requestingTool||startup.IsBusy||reviewingStartup)return false;
             if(power.IsBusy||transparency.IsBusy||reviewingPower||reviewingTransparency)return false;
             visualWindowsFailure=null;
-            bool started=visual.Start(action,transparencyConfirmation);RefreshTransparencyView();if(started)visualTimer.Start();return started;
+            bool started;requestingTool=true;try{started=visual.Start(action,transparencyConfirmation);}finally{requestingTool=false;}RefreshTransparencyView();if(started)visualTimer.Start();return started;
         }
         private void BuildVisual(TileGrid grid)
         {
             VisualResult value=visual.Snapshot;
             Tile tile=new Tile("visual","Efectos visuales","",normal,bold,metric,VisualController.StateText(value.State),false,scale);
             Label state=Tile.MakeLabel(visualWindowsFailure??visual.Status,normal,Colors.Muted);state.Name="VisualState";tile.AddContent(state);
-            ComboBox mode=new ComboBox{Name="VisualMode",Font=normal,DropDownStyle=ComboBoxStyle.DropDownList,DrawMode=DrawMode.OwnerDrawFixed,ItemHeight=normal.Height+4,BackColor=Colors.Card,ForeColor=Colors.Text,FlatStyle=FlatStyle.Flat,Enabled=!visual.IsBusy&&!power.IsBusy&&!transparency.IsBusy&&value.CanApply,DropDownWidth=(int)(340*scale)};
+            ComboBox mode=new ComboBox{Name="VisualMode",Font=normal,DropDownStyle=ComboBoxStyle.DropDownList,DrawMode=DrawMode.OwnerDrawFixed,ItemHeight=normal.Height+4,BackColor=Colors.Card,ForeColor=Colors.Text,FlatStyle=FlatStyle.Flat,Enabled=!startup.IsBusy&&!visual.IsBusy&&!power.IsBusy&&!transparency.IsBusy&&value.CanApply,DropDownWidth=(int)(340*scale)};
             mode.DrawItem+=delegate(object sender,DrawItemEventArgs e){if(e.Index<0)return;using(SolidBrush background=new SolidBrush(Colors.Card)){e.Graphics.FillRectangle(background,e.Bounds);}TextRenderer.DrawText(e.Graphics,mode.Items[e.Index].ToString(),normal,e.Bounds,mode.Enabled?Colors.Text:Colors.Muted,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPrefix);if((e.State&DrawItemState.Focus)!=0)ControlPaint.DrawFocusRectangle(e.Graphics,e.Bounds,Colors.Muted,Colors.Card);};
             mode.Items.Add("Rendimiento + letras nítidas");mode.Items.Add("Máximo rendimiento (avanzado)");mode.SelectedIndex=visualMode==VisualAction.Maximum?1:0;
             mode.AccessibleName="Modo de efectos visuales";mode.AccessibleDescription="Rendimiento + letras nítidas es la opción recomendada.";
@@ -661,6 +743,7 @@ namespace Juno.Preview
         }
         private void OpenVisualWindows()
         {
+            if(startup.IsBusy||reviewingStartup)return;
             if(visual.IsBusy||power.IsBusy||transparency.IsBusy||reviewingVisual||reviewingPower||reviewingTransparency)return;
             try{visualSettings.Open();visualWindowsFailure=null;}
             catch(Exception error){visualWindowsFailure="No se pudo abrir la configuración de Windows.";visualWindowsDiagnostic=error.ToString();}
@@ -690,6 +773,7 @@ namespace Juno.Preview
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if(startup.IsWriting){startup.Poll();if(startup.IsWriting){e.Cancel=true;status.Text="Inicio en curso. Esperá la verificación antes de cerrar.";}}
             if(visual.IsWriting){visual.Poll();if(visual.IsWriting){e.Cancel=true;RefreshTransparencyView();}}
             if(power.IsWriting){power.Poll();if(power.IsWriting){e.Cancel=true;RefreshTransparencyView();}}
             if(transparency.IsWriting){
@@ -740,9 +824,11 @@ namespace Juno.Preview
             if(SelectedSection=="Rendimiento"&&!transparency.HasRequested)RequestTransparency(TransparencyAction.Read);
             if(SelectedSection=="Rendimiento"&&power.IsConfigured&&!power.HasRequested&&!transparency.IsBusy)RequestPower(PowerAction.Read);
             if(SelectedSection=="Rendimiento"&&visual.IsConfigured&&!visual.HasRequested&&!transparency.IsBusy&&!power.IsBusy)RequestVisual(VisualAction.Read);
+            if(SelectedSection=="Aplicaciones"&&startup.IsConfigured&&!startup.HasRequested)RequestStartup(StartupAction.Read,null);
         }
         protected override void Dispose(bool disposing)
         {
+            if(disposing&&!ResourcesReleased){startupTimer.Stop();startupTimer.Dispose();startup.Dispose();}
             if(disposing&&!ResourcesReleased){visualTimer.Stop();visualTimer.Dispose();visual.Dispose();powerTimer.Stop();powerTimer.Dispose();power.Dispose();transparencyTimer.Stop();transparencyTimer.Dispose();transparency.Dispose();dashboardTimer.Stop();dashboardTimer.Dispose();dashboard.Dispose();base.Dispose(true);foreach(IDisposable asset in assets)asset.Dispose();foreach(Font font in fonts)font.Dispose();ResourcesReleased=true;return;}
             base.Dispose(disposing);
         }

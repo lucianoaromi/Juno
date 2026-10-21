@@ -3,7 +3,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $uxRoot=Split-Path $PSScriptRoot -Parent
 if(-not ('Juno.Preview.Testing.ControlledPower' -as [type])){
-    $files=@('ui\DashboardModel.cs','ui\WindowsSystemSource.cs','ui\DashboardWorker.cs','ui\TransparencyModel.cs','ui\PowerShellTransparencyService.cs','ui\TransparencyConfirmation.cs','ui\PowerModel.cs','ui\PowerPlatform.cs','ui\PowerShellPowerService.cs','ui\VisualModel.cs','ui\PowerShellVisualService.cs','ui\JunoShell.cs','tests\Dashboard.TestSupport.cs','tests\Transparency.TestSupport.cs','tests\Power.TestSupport.cs','tests\Visual.TestSupport.cs')|ForEach-Object{Join-Path $uxRoot $_}
+    $files=@('ui\DashboardModel.cs','ui\WindowsSystemSource.cs','ui\DashboardWorker.cs','ui\TransparencyModel.cs','ui\PowerShellTransparencyService.cs','ui\TransparencyConfirmation.cs','ui\PowerModel.cs','ui\PowerPlatform.cs','ui\PowerShellPowerService.cs','ui\VisualModel.cs','ui\PowerShellVisualService.cs','ui\StartupModel.cs','ui\StartupControls.cs','ui\PowerShellStartupService.cs','ui\JunoShell.cs','tests\Dashboard.TestSupport.cs','tests\Transparency.TestSupport.cs','tests\Power.TestSupport.cs','tests\Visual.TestSupport.cs','tests\Startup.TestSupport.cs')|ForEach-Object{Join-Path $uxRoot $_}
     Add-Type -Path $files -ReferencedAssemblies @('System.Windows.Forms','System.Drawing','System.Management','System.Web.Extensions',[Management.Automation.PSObject].Assembly.Location)
 }
 function New-UxPower {
