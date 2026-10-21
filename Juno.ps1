@@ -14,6 +14,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
 
 . (Join-Path $PSScriptRoot 'BackupStore.ps1')
 . (Join-Path $PSScriptRoot 'RecoveryOperations.ps1')
+. (Join-Path $PSScriptRoot 'PowerOperations.ps1')
 . (Join-Path $PSScriptRoot 'TransparencyOperations.ps1')
 . (Join-Path $PSScriptRoot 'BackgroundInventory.ps1')
 . (Join-Path $PSScriptRoot 'UiSupport.ps1')
@@ -50,26 +51,6 @@ $script:EffectCodes = [ordered]@{
     DropShadow           = @(0x1024, 0x1025)
 }
 
-function Get-GuidFromText([string]$text) {
-    $match = [regex]::Match($text, $script:GuidPattern)
-    if ($match.Success) { return $match.Value.ToLowerInvariant() }
-    return $null
-}
-function Invoke-PowerCfg([string[]]$arguments) {
-    $result = & (Get-JunoSystemTool 'powercfg.exe') @arguments 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-        throw ("Powercfg no pudo ejecutar '{0}': {1}" -f ($arguments -join ' '), $result.Trim())
-    }
-    return $result
-}
-function Get-ActivePlan {
-    $text = Invoke-PowerCfg @('/getactivescheme')
-    $guid = Get-GuidFromText $text
-    if (-not $guid) { throw 'No se pudo reconocer el identificador del plan activo.' }
-    return @{ Guid=$guid; Text=$text.Trim() }
-}
-function Enable-HighPerformance { Invoke-JunoPower $false }
-function Restore-PowerPlan { Invoke-JunoPower $true }
 
 # SPI_GET...BOOL recibe un puntero; SPI_SET...BOOL recibe el BOOL por valor.
 # El error de la v0.1 era pasar ref int tambien al SET: se interpretaba

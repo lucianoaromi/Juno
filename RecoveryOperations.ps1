@@ -15,18 +15,36 @@ function Confirm-JunoUnknownState([string]$name,$current,$original) {
 function Get-JunoPowerBackup {
     return (Read-JunoStore 'Power' 'Machine' ([pscustomobject]@{PowerScheme=$null;CreatedPowerScheme=$null}))
 }
-function Invoke-JunoPower([bool]$restore) {
+function Invoke-JunoPower([bool]$restore,[string]$selectedGuid=$null,[bool]$allowCreate=$false) {
     Assert-JunoLease
+    if(-not (Test-JunoAdmin)){throw 'Energía: requiere administrador; no se eleva automáticamente.'}
+    # Preflight de solo lectura: ni una selección cancelada/ambigua ni un no-op importan históricos.
+    $backup=Get-JunoPowerBackup
+    $before=(Get-ActivePlan).Guid; Assert-JunoGuid $before
+    $inventory=@(Get-JunoPowerInventory)
+    $decision=$null
+    if(-not $restore) {
+        $decision=Resolve-JunoPowerTarget $inventory $backup $before $selectedGuid
+        if($decision.NeedsSelection){throw 'Hay planes existentes por identificar. Elige uno explícitamente o abre Opciones de energía. No se creará otro.'}
+        $unfinished=($backup.PSObject.Properties.Name -contains 'Transaction' -and
+            ($null -ne $backup.Transaction.Pending -or $backup.Transaction.Phase -in @('Applying','Restoring')))
+        if($decision.Already -and -not $unfinished) {
+            if($decision.High){return 'Ya estás utilizando Alto rendimiento.'}
+            return 'El plan elegido ya está activo. No se realizaron modificaciones.'
+        }
+        if($decision.Create -and -not $allowCreate){throw 'La creación requiere confirmación explícita independiente. No se creó ningún plan.'}
+    }
+    $observedBefore=$before
     Import-JunoMachineLegacy 'Power'
     $backup=Get-JunoPowerBackup
     foreach ($n in @('PowerScheme','CreatedPowerScheme')) { if ($null -ne $backup.$n) { $backup.$n=$backup.$n.ToLowerInvariant() } }
     $before=(Get-ActivePlan).Guid; Assert-JunoGuid $before
+    if($before -ine $observedBefore){throw 'Conflicto: cambió el plan durante la revisión. Vuelve a consultar.'}
+    $inventory=@(Get-JunoPowerInventory)
     if ($restore -and $null -eq $backup.PowerScheme) { return 'Energia: no hay una restauracion pendiente.' }
     if ($backup.PSObject.Properties.Name -notcontains 'Transaction' -or $null -eq $backup.PowerScheme) {
         if ($null -ne $backup.PowerScheme) {
             Confirm-JunoUnknownState 'energia' $before $backup.PowerScheme
-            # Un GUID historico no demuestra propiedad sobre un plan duplicado. Conservarlo en
-            # history, pero no reutilizarlo como si fuera una creacion confirmada de esta version.
             $backup.CreatedPowerScheme=$null
         }
         else { $backup.PowerScheme=$before }
@@ -36,25 +54,37 @@ function Invoke-JunoPower([bool]$restore) {
     $t=$backup.Transaction; Sync-JunoScalar $t $before
     if ($restore) {
         $target=$backup.PowerScheme; $t.Phase='Restoring'
+        if(@($inventory.Guid) -notcontains $target){throw 'El plan original ya no existe. Se conserva el respaldo.'}
     } else {
         if ($t.Phase -eq 'Restoring') { throw 'Energia: completa la restauracion pendiente antes de aplicar otro cambio.' }
-        $plans=Invoke-PowerCfg @('/list')
-        $target=$script:HighPerformanceGuid
-        if ($plans -notmatch [regex]::Escape($target)) {
-            if ($null -eq $backup.CreatedPowerScheme) { $backup.CreatedPowerScheme=[Guid]::NewGuid().ToString() }
+        $fresh=Resolve-JunoPowerTarget $inventory $backup $before $selectedGuid
+        if($fresh.NeedsSelection -or $fresh.Create -ne $decision.Create -or
+            (-not $fresh.Create -and $fresh.Guid -ine $decision.Guid)) {
+            throw 'Conflicto: cambió la selección de planes. Vuelve a consultar; no se creará otra copia.'
+        }
+        if($fresh.Create) {
+            if(-not $allowCreate){throw 'No se autorizó crear un plan.'}
+            if($null -eq $backup.CreatedPowerScheme){$backup.CreatedPowerScheme=[Guid]::NewGuid().ToString()}
             $target=$backup.CreatedPowerScheme
             Write-JunoStore 'Power' $backup 'Machine'
-            # GUID elegido y respaldado antes de crear. Reintentar reutiliza el mismo identificador.
-            if ($plans -notmatch [regex]::Escape($target)) {
+            # Guardar la reserva puede tardar: reenumerar de nuevo inmediatamente antes de duplicar.
+            $latest=@(Get-JunoPowerInventory)
+            if((Get-ActivePlan).Guid -ine $t.Confirmed){throw 'Conflicto: cambió el plan antes de crear. Se conserva la reserva.'}
+            $check=Resolve-JunoPowerTarget $latest $backup $t.Confirmed $null
+            if(@($latest.Guid) -contains $target){throw 'Apareció el GUID reservado antes de su creación. Revisa y vuelve a consultar.'}
+            if(@($latest.Guid) -notcontains $target) {
+                if(-not $check.Create){throw 'Apareció un plan reutilizable antes de duplicar. Elige un plan existente.'}
                 Invoke-PowerCfg @('/duplicatescheme',$script:HighPerformanceGuid,$target) | Out-Null
-                if ((Invoke-PowerCfg @('/list')) -notmatch [regex]::Escape($target)) { throw 'Energia: no se pudo verificar la creacion del plan. Se conserva el identificador pendiente.' }
+                if(@((Get-JunoPowerInventory).Guid) -notcontains $target){throw 'Energia: no se pudo verificar la creacion del plan. Se conserva el identificador pendiente.'}
             }
-        }
+        } else {$target=$fresh.Guid}
         $t.Phase='Applying'
     }
     Assert-JunoGuid $target
     if ($before -ine $target) {
         $t.Pending=$target; Write-JunoStore 'Power' $backup 'Machine'
+        $latest=@(Get-JunoPowerInventory)
+        if(@($latest.Guid) -notcontains $target){throw 'El plan objetivo desapareció antes de activar. Se conserva el diario.'}
         if ((Get-ActivePlan).Guid -ine $t.Confirmed) { throw 'Conflicto: cambio el plan antes de escribir. La operacion queda pendiente.' }
         Invoke-PowerCfg @('/setactive',$target) | Out-Null
         if ((Get-ActivePlan).Guid -ine $target) { throw 'Energia: no se pudo verificar el plan activo. Se conserva la operacion pendiente.' }
@@ -63,7 +93,7 @@ function Invoke-JunoPower([bool]$restore) {
     if ($restore) { $backup.PowerScheme=$null; $t.Phase='Restored' } else { $t.Phase='Applied' }
     Write-JunoStore 'Power' $backup 'Machine'
     if ($restore) { return 'Energia: plan original restaurado y verificado. Los planes duplicados se conservan para revision manual.' }
-    return "Energia: plan Alto rendimiento activado y verificado ($target)."
+    return "Energia: plan elegido activado y verificado ($target)."
 }
 
 function Get-JunoVisualState {

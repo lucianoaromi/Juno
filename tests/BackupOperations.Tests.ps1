@@ -4,9 +4,11 @@ $ErrorActionPreference='Stop'
 $operationRoot=Split-Path $PSScriptRoot -Parent
 . (Join-Path $operationRoot 'BackupStore.ps1')
 . (Join-Path $operationRoot 'RecoveryOperations.ps1')
+. (Join-Path $operationRoot 'PowerOperations.ps1')
 . (Join-Path $operationRoot 'BackgroundInventory.ps1')
 foreach($spec in @(
-    @{File='Juno.ps1';Names=@('Enable-HighPerformance','Restore-PowerPlan','Apply-VisualEffects','Restore-VisualEffects')},
+    @{File='Juno.ps1';Names=@('Apply-VisualEffects','Restore-VisualEffects')},
+    @{File='PowerOperations.ps1';Names=@('Enable-HighPerformance','Restore-PowerPlan')},
     @{File='TransparencyOperations.ps1';Names=@('Get-Backup','Save-Backup','Set-Transparency','Restore-Transparency')},
     @{File='PermisosSegundoPlano.ps1';Names=@('Read-BPPBackup','Write-BPPBackup','Disable-BPPApps','Restore-BPPApps')},
     @{File='Discos.ps1';Names=@('Update-DiskDetails')}
@@ -149,10 +151,10 @@ Describe 'Diarios de energia, visuales, transparencia, directiva y TRIM sin Wind
         $foreign='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
         $global:JunoOperationFake.Power=[pscustomobject]@{PowerScheme=$global:JunoOperationFake.PowerActive;CreatedPowerScheme=$foreign}
         $global:JunoOperationFake.Plans=@($global:JunoOperationFake.PowerActive,$foreign)
-        Enable-HighPerformance|Out-Null
-        $global:JunoOperationFake.Power.CreatedPowerScheme|Should Not Be $foreign
+        {Enable-HighPerformance}|Should Throw
+        $global:JunoOperationFake.Power.CreatedPowerScheme|Should Be $foreign
         @($global:JunoOperationFake.PowerArguments|Where-Object{$_ -eq ('/setactive '+$foreign) -or $_ -like '/delete*'}).Count|Should Be 0
-        Assert-MockCalled Confirm-JunoReview -Times 1 -Exactly -Scope It
+        Assert-MockCalled Confirm-JunoReview -Times 0 -Exactly -Scope It
     }
     It 'energia reintenta errores antes/despues de escribir sin perder el original' -TestCases @(@{Mode='Before'},@{Mode='After'},@{Mode='Ignore'}) {
         param($Mode)
@@ -165,7 +167,7 @@ Describe 'Diarios de energia, visuales, transparencia, directiva y TRIM sin Wind
     It 'energia persiste el GUID de duplicacion antes de crear y lo reutiliza' {
         $global:JunoOperationFake.Plans=@('381b4222-f694-41f0-9685-ff5bb260df2e')
         $global:JunoOperationFake.FaultMode='After';$global:JunoOperationFake.FaultWrites=@(1)
-        {Enable-HighPerformance}|Should Throw
+        {Enable-HighPerformance -AllowCreate}|Should Throw
         $created=$global:JunoOperationFake.Power.CreatedPowerScheme;Assert-JunoGuid $created
         Enable-HighPerformance|Out-Null
         $global:JunoOperationFake.Power.CreatedPowerScheme|Should Be $created
