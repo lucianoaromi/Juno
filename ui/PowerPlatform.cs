@@ -39,6 +39,17 @@ namespace Juno.Preview
         {using(var process=Process.Start(info)){}}
     }
     public interface IColorsSettingsLauncher { void Open(); }
+    public interface ICleanupSettingsLauncher { void Open(); }
+    public sealed class WindowsCleanupSettingsLauncher : ICleanupSettingsLauncher
+    {
+        private readonly Action<ProcessStartInfo> launch;
+        public WindowsCleanupSettingsLauncher():this(Start){}
+        public WindowsCleanupSettingsLauncher(Action<ProcessStartInfo> start)
+        {if(start==null)throw new ArgumentNullException("start");launch=start;}
+        public void Open(){launch(new ProcessStartInfo("ms-settings:storagesense"){UseShellExecute=true});}
+        private static void Start(ProcessStartInfo info)
+        {using(var process=Process.Start(info)){}}
+    }
     public sealed class WindowsColorsSettingsLauncher : IColorsSettingsLauncher
     {
         private readonly Action<ProcessStartInfo> launch;

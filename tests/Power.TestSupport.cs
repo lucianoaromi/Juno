@@ -28,12 +28,18 @@ namespace Juno.Preview.Testing
         public int Calls;public bool Fail;
         public void Open(){Calls++;if(Fail)throw new InvalidOperationException("SIMULATED colors failure");}
     }
+    public sealed class ControlledCleanupSettings : ICleanupSettingsLauncher
+    {
+        public int Calls;public bool Fail;
+        public void Open(){Calls++;if(Fail)throw new InvalidOperationException("SIMULATED cleanup settings failure");}
+    }
     public sealed class ConfigurationLaunchCapture
     {
         public System.Diagnostics.ProcessStartInfo Info;
         public void Start(System.Diagnostics.ProcessStartInfo info){Info=info;}
         public WindowsPowerPlansLauncher Power(){return new WindowsPowerPlansLauncher(Start);}
         public WindowsColorsSettingsLauncher Colors(){return new WindowsColorsSettingsLauncher(Start);}
+        public WindowsCleanupSettingsLauncher Cleanup(){return new WindowsCleanupSettingsLauncher(Start);}
     }
     public sealed class ControlledPowerSelection : IPowerPlanSelection
     {
