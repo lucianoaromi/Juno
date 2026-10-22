@@ -294,6 +294,7 @@ namespace Juno.Preview
         public DashboardController Dashboard {get{return dashboard;}}
         private readonly TransparencyController transparency;
         private readonly ITransparencyConfirmation transparencyConfirmation;
+        private readonly IColorsSettingsLauncher colorsSettings;
         private readonly Timer transparencyTimer;
         private bool reviewingTransparency;
         public TransparencyController Transparency {get{return transparency;}}
@@ -330,10 +331,13 @@ namespace Juno.Preview
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings)
             :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,settings,new StartupController(new UnavailableStartupService()),null){}
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings)
+            :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,settings,launchItems,launchSettings,null){}
+        public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings,IColorsSettingsLauncher colors)
         {
             if(controller==null)throw new ArgumentNullException("controller");dashboard=controller;
             if(integration==null)throw new ArgumentNullException("integration");transparency=integration;
             transparencyConfirmation=confirmation??new TransparencyConfirmation(this);
+            colorsSettings=colors??new WindowsColorsSettingsLauncher();
             if(energy==null)throw new ArgumentNullException("energy");power=energy;
             powerPlans=plans??new WindowsPowerPlansLauncher();
             powerSelection=selection??new PowerPlanSelectionDialog(this);
@@ -618,7 +622,7 @@ namespace Juno.Preview
             }
             ToolActions row=new ToolActions(scale);
             if(value.CanRestore){PreviewButton restore=ToolButton("TransparencyRestore","Restaurar anterior",false,!visual.IsBusy&&!power.IsBusy&&transparency.CanStart(TransparencyAction.Restore));restore.Click+=delegate{RequestTransparency(TransparencyAction.Restore);};row.Controls.Add(restore);}
-            PreviewButton details=ToolButton("TransparencyDetails","Ver detalles",false,true);details.Click+=delegate{ShowToolDetails(false);};row.Controls.Add(details);tile.AddContent(row);grid.Controls.Add(tile);
+            PreviewButton windows=ToolButton("TransparencyWindows","Configurar en Windows",false,!StartupBlocked);windows.Click+=delegate{OpenTransparencyWindows();};row.Controls.Add(windows);tile.AddContent(row);grid.Controls.Add(tile);
         }
         private PreviewButton ToolButton(string name,string text,bool accent,bool enabled)
         {return new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(44*scale),Enabled=enabled&&!startup.IsBusy&&!reviewingStartup};}
@@ -665,7 +669,19 @@ namespace Juno.Preview
             }
             ToolActions row=new ToolActions(scale);
             if(!active&&value.CanRestore){PreviewButton restore=ToolButton("PowerRestore","Restaurar anterior",false,!visual.IsBusy&&!transparency.IsBusy&&power.CanStart(PowerAction.Restore));restore.Click+=delegate{RequestPower(PowerAction.Restore);};row.Controls.Add(restore);}
-            PreviewButton details=ToolButton("PowerDetails","Ver detalles",false,true);details.Click+=delegate{ShowToolDetails(true);};row.Controls.Add(details);tile.AddContent(row);grid.Controls.Add(tile);
+            PreviewButton windows=ToolButton("PowerWindows","Configurar en Windows",false,!StartupBlocked);windows.Click+=delegate{OpenPowerWindows();};row.Controls.Add(windows);tile.AddContent(row);grid.Controls.Add(tile);
+        }
+        private void OpenPowerWindows()
+        {
+            if(StartupBlocked)return;
+            try{powerPlans.Open();}
+            catch(Exception){status.Text="No se pudo abrir Opciones de energía de Windows.";}
+        }
+        private void OpenTransparencyWindows()
+        {
+            if(StartupBlocked)return;
+            try{colorsSettings.Open();}
+            catch(Exception){status.Text="No se pudo abrir Colores de Windows.";}
         }
         public Form CreateToolDetails(bool energy)
         {

@@ -20,7 +20,20 @@ namespace Juno.Preview.Testing
     public sealed class ControlledPowerPlans : IPowerPlansLauncher
     {
         public int Calls;
-        public void Open(){Calls++;}
+        public bool Fail;
+        public void Open(){Calls++;if(Fail)throw new InvalidOperationException("SIMULATED power options failure");}
+    }
+    public sealed class ControlledColorsSettings : IColorsSettingsLauncher
+    {
+        public int Calls;public bool Fail;
+        public void Open(){Calls++;if(Fail)throw new InvalidOperationException("SIMULATED colors failure");}
+    }
+    public sealed class ConfigurationLaunchCapture
+    {
+        public System.Diagnostics.ProcessStartInfo Info;
+        public void Start(System.Diagnostics.ProcessStartInfo info){Info=info;}
+        public WindowsPowerPlansLauncher Power(){return new WindowsPowerPlansLauncher(Start);}
+        public WindowsColorsSettingsLauncher Colors(){return new WindowsColorsSettingsLauncher(Start);}
     }
     public sealed class ControlledPowerSelection : IPowerPlanSelection
     {

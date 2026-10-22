@@ -2,6 +2,7 @@
 
 Priorizar utilidad real, simplicidad, diseño compacto, seguridad e información mínima útil.
 No mostrar diagnósticos internos ni controles que aparenten una función que no pueden realizar.
+No agregar botones de diagnóstico ni información técnica en las vistas principales cuando no sean necesarios para operar la herramienta. Una función sencilla debe tener una interfaz sencilla.
 Usar la herramienta oficial de Windows cuando una integración propia no aporte ventajas prácticas.
 Mantener la estética oscura y dorada y comprobar la interfaz real, además de las pruebas automatizadas.
 

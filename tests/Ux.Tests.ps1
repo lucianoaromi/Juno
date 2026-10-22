@@ -109,7 +109,7 @@ Describe 'Experiencia compacta con proveedores ficticios' {
         $uxTransparency.Start('Read',$uxConfirmation)|Out-Null;$uxTrans.Complete($tr);$uxTransparency.Poll()|Out-Null
         $uxForm.ClientSize=New-Object Drawing.Size($Width,650)
         foreach($section in [Juno.Preview.ShellForm]::Sections){$uxForm.Navigate($section)};$uxForm.Navigate('Rendimiento');$uxForm.PerformLayout()
-        foreach($name in @('PowerApply','PowerRestore','PowerDetails','TransparencyEnable','TransparencyRestore','TransparencyDetails')){
+        foreach($name in @('PowerApply','PowerRestore','PowerWindows','TransparencyEnable','TransparencyRestore','TransparencyWindows')){
             $button=(Find-Ux $uxForm $name)[0]
             ($button.Right -le $button.Parent.ClientSize.Width)|Should Be $true
             ($button.Bottom -le $button.Parent.ClientSize.Height)|Should Be $true

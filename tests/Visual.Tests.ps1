@@ -245,15 +245,15 @@ Describe 'Tarjeta visual con tareas controladas' {
         Set-VisualUiResult (New-VisualUiResult);$visualForm.Controls.Find('VisualState',$true)[0].Text|Should Not Match 'SPI|HKCU'
         $details=$visualForm.CreateVisualDetails();try{$details.Controls.Find('TechnicalDetails',$true)[0].Text|Should Match 'SPI ficticio';$details.Controls.Find('VisualRead',$true)[0].Enabled|Should Be $true}finally{$details.Dispose()}
     }
-    It 'Configurar en Windows reemplaza Ver detalles solo en la tarjeta visual' {
+    It 'Configurar en Windows conserva su comportamiento en la tarjeta visual' {
         Set-VisualUiResult (New-VisualUiResult)
         $card=$visualForm.Controls.Find('visual',$true)[0];$button=$card.Controls.Find('VisualWindows',$true)[0]
         $button.Text|Should Be 'Configurar en Windows';$button.Secondary|Should Be $true;$button.Accent|Should Be $false
         @($card.Controls.Find('VisualDetails',$true)).Count|Should Be 0
         $button.ContextMenuStrip.Items['VisualRefreshMenu'].Text|Should Be 'Actualizar estado'
         $button.ContextMenuStrip.Items['VisualDiagnosticsMenu'].Text|Should Be 'Diagnóstico'
-        @($visualForm.Controls.Find('PowerDetails',$true)).Count|Should Be 1
-        @($visualForm.Controls.Find('TransparencyDetails',$true)).Count|Should Be 1
+        @($visualForm.Controls.Find('PowerWindows',$true)).Count|Should Be 1
+        @($visualForm.Controls.Find('TransparencyWindows',$true)).Count|Should Be 1
     }
     It 'abrir Windows no confirma, consulta, aplica ni altera el estado o la restauración' {
         $r=New-VisualUiResult;$r.CanRestore=$true;Set-VisualUiResult $r

@@ -24,12 +24,30 @@ namespace Juno.Preview
     public interface IPowerPlansLauncher { void Open(); }
     public sealed class WindowsPowerPlansLauncher : IPowerPlansLauncher
     {
+        private readonly Action<ProcessStartInfo> launch;
+        public WindowsPowerPlansLauncher():this(Start){}
+        public WindowsPowerPlansLauncher(Action<ProcessStartInfo> start)
+        {if(start==null)throw new ArgumentNullException("start");launch=start;}
         public void Open()
         {
             string system=Environment.GetFolderPath(Environment.SpecialFolder.System);
             if(Environment.Is64BitOperatingSystem&&!Environment.Is64BitProcess)
                 system=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"Sysnative");
-            Process.Start(new ProcessStartInfo(Path.Combine(system,"control.exe"),"/name Microsoft.PowerOptions"){UseShellExecute=true});
+            launch(new ProcessStartInfo(Path.Combine(system,"control.exe"),"/name Microsoft.PowerOptions"){UseShellExecute=true});
         }
+        private static void Start(ProcessStartInfo info)
+        {using(var process=Process.Start(info)){}}
+    }
+    public interface IColorsSettingsLauncher { void Open(); }
+    public sealed class WindowsColorsSettingsLauncher : IColorsSettingsLauncher
+    {
+        private readonly Action<ProcessStartInfo> launch;
+        public WindowsColorsSettingsLauncher():this(Start){}
+        public WindowsColorsSettingsLauncher(Action<ProcessStartInfo> start)
+        {if(start==null)throw new ArgumentNullException("start");launch=start;}
+        public void Open(){launch(new ProcessStartInfo("ms-settings:colors"){UseShellExecute=true});}
+        // ShellExecute puede reutilizar una ventana existente sin devolver un proceso.
+        private static void Start(ProcessStartInfo info)
+        {using(var process=Process.Start(info)){}}
     }
 }
