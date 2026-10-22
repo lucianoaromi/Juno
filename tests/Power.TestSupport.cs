@@ -33,6 +33,11 @@ namespace Juno.Preview.Testing
         public int Calls;public bool Fail;
         public void Open(){Calls++;if(Fail)throw new InvalidOperationException("SIMULATED cleanup settings failure");}
     }
+    public sealed class ControlledDiskSettings : IDiskSettingsLauncher
+    {
+        public int Calls;public Exception Failure;
+        public void Open(){Calls++;if(Failure!=null)throw Failure;}
+    }
     public sealed class ConfigurationLaunchCapture
     {
         public System.Diagnostics.ProcessStartInfo Info;
@@ -40,6 +45,7 @@ namespace Juno.Preview.Testing
         public WindowsPowerPlansLauncher Power(){return new WindowsPowerPlansLauncher(Start);}
         public WindowsColorsSettingsLauncher Colors(){return new WindowsColorsSettingsLauncher(Start);}
         public WindowsCleanupSettingsLauncher Cleanup(){return new WindowsCleanupSettingsLauncher(Start);}
+        public WindowsDiskSettingsLauncher Disks(){return new WindowsDiskSettingsLauncher(Start);}
     }
     public sealed class ControlledPowerSelection : IPowerPlanSelection
     {

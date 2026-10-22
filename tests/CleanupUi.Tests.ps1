@@ -29,7 +29,7 @@ Describe 'Limpieza moderna: acceso útil a Windows sin resultados inventados' {
         $section.Controls[2].Text|Should Be 'Abrir limpieza de Windows';$section.Controls[2].Secondary|Should Be $true
         ($section.Controls.Text -join ' ')|Should Not Match 'Analizar|GB|MB|recuperable|liberado|diagnóstico|detalles'
         @($section.Controls|Where-Object{$_ -is [Windows.Forms.DataGridView] -or $_ -is [Windows.Forms.ListView]}).Count|Should Be 0
-        $cleanupWindow.Controls.Find('InformationBadge',$true)[0].Text|Should Match 'LIMPIEZA EN WINDOWS'
+        $cleanupWindow.Controls.Find('InformationBadge',$true)[0].Text|Should Match 'MANTENIMIENTO EN WINDOWS'
     }
     It 'mostrar y navegar no analiza, abre herramientas ni consulta servicios' {
         $cleanupWindow.Show();[Windows.Forms.Application]::DoEvents()
@@ -64,10 +64,11 @@ Describe 'Limpieza moderna: acceso útil a Windows sin resultados inventados' {
         for($i=0;$i -lt 3;$i++){for($j=$i+1;$j -lt 3;$j++){$section.Controls[$i].Bounds.IntersectsWith($section.Controls[$j].Bounds)|Should Be $false}}
         $size=$section.Size;$cleanupWindow.Navigate('Inicio');$cleanupWindow.Navigate('Mantenimiento');$cleanupWindow.Controls.Find('cleanup',$true)[0].Size|Should Be $size
     }
-    It 'no altera otras secciones ni conecta herramientas pendientes' {
+    It 'conserva las demás herramientas y el acceso oficial de discos' {
         $cleanupWindow.Navigate('Aplicaciones');$cleanupWindow.Controls.Find('startup',$true)[0].Controls.Count|Should Be 3
         $cleanupWindow.Navigate('Rendimiento');foreach($name in @('VisualWindows','PowerWindows','TransparencyWindows')){@($cleanupWindow.Controls.Find($name,$true)).Count|Should Be 1}
-        $cleanupWindow.Navigate('Mantenimiento');$buttons=@($cleanupWindow.Controls.Find('ToolAction',$true));$buttons.Count|Should Be 1;$buttons[0].Enabled|Should Be $false
+        $cleanupWindow.Navigate('Mantenimiento');@($cleanupWindow.Controls.Find('ToolAction',$true)).Count|Should Be 0
+        $cleanupWindow.Controls.Find('DiskWindows',$true)[0].Text|Should Be 'Optimizar unidades en Windows'
     }
     It 'usa la URI oficial sin comandos automáticos ni elevación en <Windows>' -TestCases @(@{Windows='Windows 10'},@{Windows='Windows 11'}) {
         param($Windows)$capture=New-Object Juno.Preview.Testing.ConfigurationLaunchCapture;$capture.Cleanup().Open();$info=$capture.Info

@@ -40,6 +40,25 @@ namespace Juno.Preview
     }
     public interface IColorsSettingsLauncher { void Open(); }
     public interface ICleanupSettingsLauncher { void Open(); }
+    public interface IDiskSettingsLauncher { void Open(); }
+    public sealed class WindowsDiskSettingsLauncher : IDiskSettingsLauncher
+    {
+        private readonly Action<ProcessStartInfo> launch;
+        public WindowsDiskSettingsLauncher():this(Start){}
+        public WindowsDiskSettingsLauncher(Action<ProcessStartInfo> start)
+        {if(start==null)throw new ArgumentNullException("start");launch=start;}
+        public void Open()
+        {
+            string system=Environment.GetFolderPath(Environment.SpecialFolder.System);
+            if(Environment.Is64BitOperatingSystem&&!Environment.Is64BitProcess)
+                system=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"Sysnative");
+            string path=Path.Combine(system,"dfrgui.exe");
+            if(!File.Exists(path))throw new FileNotFoundException("Optimizador de Windows no disponible.");
+            launch(new ProcessStartInfo(path){UseShellExecute=true});
+        }
+        private static void Start(ProcessStartInfo info)
+        {using(var process=Process.Start(info)){}}
+    }
     public sealed class WindowsCleanupSettingsLauncher : ICleanupSettingsLauncher
     {
         private readonly Action<ProcessStartInfo> launch;

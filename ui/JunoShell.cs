@@ -194,17 +194,18 @@ namespace Juno.Preview
         }
     }
 
-    internal sealed class CleanupSettingsSection : Surface
+    internal sealed class WindowsSettingsSection : Surface
     {
         private readonly float scale;
+        private readonly int buttonWidth;
         private readonly Label title,description;
         private readonly PreviewButton settings;
-        public CleanupSettingsSection(float factor,Font normal,Font bold,bool enabled,Action open)
+        public WindowsSettingsSection(string name,string heading,string text,string buttonName,string buttonText,int width,float factor,Font normal,Font bold,bool enabled,Action open)
         {
-            scale=factor;Name="cleanup";Padding=new Padding((int)(16*scale));AccessibleName="LIMPIEZA INTELIGENTE";
-            title=new Label{Text="LIMPIEZA INTELIGENTE",Font=bold,ForeColor=Colors.Text};
-            description=Tile.MakeLabel("Revisá los archivos temporales y elegí qué eliminar en Windows.",normal,Colors.Muted);
-            settings=new PreviewButton{Name="CleanupWindows",Text="Abrir limpieza de Windows",Font=normal,Secondary=true,Enabled=enabled};
+            scale=factor;buttonWidth=width;Name=name;Padding=new Padding((int)(16*scale));AccessibleName=heading;
+            title=new Label{Text=heading,Font=bold,ForeColor=Colors.Text};
+            description=Tile.MakeLabel(text,normal,Colors.Muted);
+            settings=new PreviewButton{Name=buttonName,Text=buttonText,Font=normal,Secondary=true,Enabled=enabled};
             settings.Click+=delegate{if(settings.Enabled)open();};
             Controls.Add(title);Controls.Add(description);Controls.Add(settings);
         }
@@ -218,7 +219,7 @@ namespace Juno.Preview
             int width=Math.Max(1,ClientSize.Width-Padding.Horizontal),y=Padding.Top;
             title.SetBounds(Padding.Left,y,width,(int)(26*scale));y+=(int)(34*scale);
             int textHeight=DescriptionHeight(width);description.SetBounds(Padding.Left,y,width,textHeight);y+=textHeight+(int)(12*scale);
-            settings.SetBounds(Padding.Left,y,Math.Min(width,(int)(230*scale)),(int)(34*scale));
+            settings.SetBounds(Padding.Left,y,Math.Min(width,(int)(buttonWidth*scale)),(int)(34*scale));
             base.OnLayout(e);
         }
     }
@@ -325,6 +326,7 @@ namespace Juno.Preview
         private readonly ITransparencyConfirmation transparencyConfirmation;
         private readonly IColorsSettingsLauncher colorsSettings;
         private readonly ICleanupSettingsLauncher cleanupSettings;
+        private readonly IDiskSettingsLauncher diskSettings;
         private readonly Timer transparencyTimer;
         private bool reviewingTransparency;
         public TransparencyController Transparency {get{return transparency;}}
@@ -365,12 +367,15 @@ namespace Juno.Preview
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings,IColorsSettingsLauncher colors)
             :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,settings,launchItems,launchSettings,colors,null){}
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings,IColorsSettingsLauncher colors,ICleanupSettingsLauncher cleanup)
+            :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,settings,launchItems,launchSettings,colors,cleanup,null){}
+        public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings,IColorsSettingsLauncher colors,ICleanupSettingsLauncher cleanup,IDiskSettingsLauncher disks)
         {
             if(controller==null)throw new ArgumentNullException("controller");dashboard=controller;
             if(integration==null)throw new ArgumentNullException("integration");transparency=integration;
             transparencyConfirmation=confirmation??new TransparencyConfirmation(this);
             colorsSettings=colors??new WindowsColorsSettingsLauncher();
             cleanupSettings=cleanup??new WindowsCleanupSettingsLauncher();
+            diskSettings=disks??new WindowsDiskSettingsLauncher();
             if(energy==null)throw new ArgumentNullException("energy");power=energy;
             powerPlans=plans??new WindowsPowerPlansLauncher();
             powerSelection=selection??new PowerPlanSelectionDialog(this);
@@ -495,7 +500,7 @@ namespace Juno.Preview
             SelectedSection=section;breadcrumb.Text="ESPACIO DE TRABAJO  /  "+section;
             foreach(KeyValuePair<string,PreviewButton> pair in navigation){pair.Value.Selected=pair.Key==section;pair.Value.AccessibleDescription=pair.Value.Selected?"Sección seleccionada":"Ir a "+pair.Key;pair.Value.Invalidate();}
             status.Text=ToolsStatus;
-            header.Controls["InformationBadge"].Text=section=="Inicio"?"●  LECTURA DEL SISTEMA":section=="Rendimiento"?"●  AJUSTES DE RENDIMIENTO":section=="Aplicaciones"?"●  PROGRAMAS DE INICIO":section=="Mantenimiento"?"●  LIMPIEZA EN WINDOWS":"●  HERRAMIENTAS SIN CONECTAR";
+            header.Controls["InformationBadge"].Text=section=="Inicio"?"●  LECTURA DEL SISTEMA":section=="Rendimiento"?"●  AJUSTES DE RENDIMIENTO":section=="Aplicaciones"?"●  PROGRAMAS DE INICIO":section=="Mantenimiento"?"●  MANTENIMIENTO EN WINDOWS":"●  HERRAMIENTAS SIN CONECTAR";
             switch(section){
                 case "Inicio":BuildHome();break;
                 case "Rendimiento":BuildPerformance();break;
@@ -551,9 +556,14 @@ namespace Juno.Preview
         }
         private void BuildMaintenance()
         {
-            page.Controls.Add(new CleanupSettingsSection(scale,normal,bold,!StartupBlocked,OpenCleanupWindows));
-            TileGrid grid=Grid(2);
-            grid.Controls.Add(Tool("disk","Diagnóstico SSD / HDD","Espacio reservado para unidades, estado de Windows e información de TRIM."));page.Controls.Add(grid);
+            page.Controls.Add(new WindowsSettingsSection("cleanup","LIMPIEZA INTELIGENTE","Revisá los archivos temporales y elegí qué eliminar en Windows.","CleanupWindows","Abrir limpieza de Windows",230,scale,normal,bold,!StartupBlocked,OpenCleanupWindows));
+            page.Controls.Add(new WindowsSettingsSection("disks","DISCOS SSD/HDD","Consultá y optimizá tus unidades utilizando las herramientas de Windows.","DiskWindows","Optimizar unidades en Windows",270,scale,normal,bold,!StartupBlocked,OpenDiskWindows));
+        }
+        private void OpenDiskWindows()
+        {
+            if(StartupBlocked)return;
+            try{diskSettings.Open();status.Text=ToolsStatus;}
+            catch(Exception){status.Text="No se pudo abrir Optimizar unidades de Windows.";}
         }
         private void OpenCleanupWindows()
         {
@@ -672,7 +682,9 @@ namespace Juno.Preview
                 Control[] buttons=Controls.Find("StartupWindows",true);if(buttons.Length==1)buttons[0].Enabled=!StartupBlocked;
             }
             if(SelectedSection=="Mantenimiento"){
-                Control[] buttons=Controls.Find("CleanupWindows",true);if(buttons.Length==1)buttons[0].Enabled=!StartupBlocked;
+                foreach(string name in new[]{"CleanupWindows","DiskWindows"}){
+                    Control[] buttons=Controls.Find(name,true);if(buttons.Length==1)buttons[0].Enabled=!StartupBlocked;
+                }
             }
             if(SelectedSection=="Rendimiento"){
                 int scroll=-viewport.AutoScrollPosition.Y;
@@ -847,6 +859,8 @@ namespace Juno.Preview
             int height=page.GetPreferredSize(new Size(width,0)).Height;
             page.SetBounds(pad,pad+viewport.AutoScrollPosition.Y,width,height);page.ResumeLayout(true);
             viewport.AutoScrollMinSize=new Size(0,height+pad*2);
+            // Recalcular el área virtual después de fijar el ancho final del contenido.
+            viewport.PerformLayout();
         }
         protected override void OnShown(EventArgs e)
         {

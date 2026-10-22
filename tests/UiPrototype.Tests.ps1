@@ -77,7 +77,7 @@ Describe 'JUNO v0.9: shell visual independiente' {
     }
 
     It 'mantiene las herramientas no integradas inactivas' {
-        $counts=@{'Rendimiento'=0;'Aplicaciones'=2;'Mantenimiento'=1;'Restauración'=2}
+        $counts=@{'Rendimiento'=0;'Aplicaciones'=2;'Mantenimiento'=0;'Restauración'=2}
         foreach($section in $counts.Keys){
             $preview.Navigate($section)
             $actions=@(Get-PreviewControls $preview|Where-Object{$_.Name -eq 'ToolAction'})
@@ -119,6 +119,26 @@ Describe 'JUNO v0.9: shell visual independiente' {
         $preview.Close()
     }
 
+    It 'recalcula el ancho virtual al reducir y ampliar una ventana ya abierta' {
+        $preview.ClientSize=New-Object Drawing.Size(1180,790);$preview.Show();[Windows.Forms.Application]::DoEvents()
+        foreach($section in [Juno.Preview.ShellForm]::Sections){
+            $preview.Navigate($section)
+            foreach($width in @(1180,940,700,940,1180,700)){
+                $preview.ClientSize=New-Object Drawing.Size($width,500);$preview.PerformLayout();[Windows.Forms.Application]::DoEvents()
+                $viewport=$preview.Controls.Find('ContentViewport',$true)[0]
+                $viewport.HorizontalScroll.Visible|Should Be $false
+                ($viewport.DisplayRectangle.Width -le $viewport.ClientSize.Width)|Should Be $true
+            }
+        }
+    }
+    It 'el recálculo conserva el desplazamiento vertical y lo reinicia al navegar' {
+        $preview.ClientSize=New-Object Drawing.Size(700,500);$preview.Show();[Windows.Forms.Application]::DoEvents()
+        $viewport=$preview.Controls.Find('ContentViewport',$true)[0];$viewport.AutoScrollPosition=New-Object Drawing.Point(0,200)
+        ($viewport.AutoScrollPosition.Y -lt 0)|Should Be $true
+        $preview.ClientSize=New-Object Drawing.Size(940,500);$preview.PerformLayout();[Windows.Forms.Application]::DoEvents()
+        ($viewport.AutoScrollPosition.Y -lt 0)|Should Be $true;$viewport.HorizontalScroll.Visible|Should Be $false
+        $preview.Navigate('Mantenimiento');$viewport.AutoScrollPosition.Y|Should Be 0
+    }
     It 'rechaza una sección desconocida sin alterar la actual' {
         {$preview.Navigate('No existe')}|Should Throw
         $preview.SelectedSection|Should Be 'Inicio'
