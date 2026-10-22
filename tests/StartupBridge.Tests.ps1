@@ -246,4 +246,24 @@ Describe 'Inicio: puente real con Windows completamente ficticio' {
         $s=Read-StartupBridgeFixture $sFixture;$s.Admin=$true;$e=New-StartupBridgeEntry 'Spotify' 'Equipo';$e.SourceView='Registry32';$e.Id="LocalMachine|Registry32|$($e.SourceKey)|Spotify";$e.ApprovalKey='Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32';$s.Entries=@($e);Save-StartupBridgeFixture $sFixture $s
         (Disable-StartupBridge).Outcome|Should Be Applied;$d=Get-Content -LiteralPath $sFixture.Machine -Raw|ConvertFrom-Json;$d.Data.Entries[0].ApprovalView|Should Be Registry64;(Invoke-StartupBridge Restore).Outcome|Should Be Restored
     }
+    It 'recuperación general restaura el respaldo sin volver a administrar entradas desde Aplicaciones' {
+        [void](Disable-StartupBridge)
+        $controller=New-Object Juno.Preview.StartupController($sBridge);$confirm=New-Object Juno.Preview.Testing.ControlledConfirmation;$confirm.Accept=$true
+        $d=New-Object Juno.Preview.DashboardController((New-Object Juno.Preview.UnavailableDashboardQuery));$t=New-Object Juno.Preview.TransparencyController((New-Object Juno.Preview.UnavailableTransparencyService));$p=New-Object Juno.Preview.PowerController((New-Object Juno.Preview.UnavailablePowerService));$v=New-Object Juno.Preview.VisualController((New-Object Juno.Preview.UnavailableVisualService));$settings=New-Object Juno.Preview.Testing.ControlledStartupSettings
+        $window=New-Object Juno.Preview.ShellForm($startupBridgeRoot,$d,$t,$confirm,$p,$null,$null,$v,$null,$controller,$settings)
+        try{
+            $window.Navigate('Aplicaciones');$window.Controls.Find('startup',$true)[0].Controls.Count|Should Be 3;$controller.HasRequested|Should Be $false
+            $backup=[IO.File]::ReadAllText($sFixture.Backup);(Read-StartupBridgeFixture $sFixture).Writes|Should Be 1
+            $window.Navigate('Restauración');$button=$window.Controls.Find('StartupRecoveryRead',$true)[0]
+            [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
+            $watch=[Diagnostics.Stopwatch]::StartNew();while($controller.IsBusy -and $watch.ElapsedMilliseconds -lt 20000){[void]$controller.Poll();[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
+            $controller.IsBusy|Should Be $false;$controller.Snapshot.CanRestore|Should Be $true
+            [IO.File]::ReadAllText($sFixture.Backup)|Should Be $backup;(Read-StartupBridgeFixture $sFixture).Writes|Should Be 1
+            $window.Navigate('Restauración');$button=$window.Controls.Find('StartupRestore',$true)[0]
+            [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
+            $watch.Restart();while($controller.IsBusy -and $watch.ElapsedMilliseconds -lt 20000){[void]$controller.Poll();[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
+            $controller.IsBusy|Should Be $false;$controller.Snapshot.Outcome|Should Be Restored;$confirm.Calls|Should Be 1
+            @((Read-StartupBridgeFixture $sFixture).Values.PSObject.Properties).Count|Should Be 0
+        }finally{$window.Dispose()}
+    }
 }
