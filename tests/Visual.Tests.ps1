@@ -195,138 +195,79 @@ Describe 'Tarjeta visual con tareas controladas' {
     It 'navegar sin mostrar no consulta ni cambia nada' {
         foreach($section in [Juno.Preview.ShellForm]::Sections){$visualForm.Navigate($section)};$visualProvider.Calls|Should Be 0;$visualProvider.WriteCalls|Should Be 0
     }
-    It 'abrir Rendimiento consulta secuencialmente sin escrituras ni selección automática de máximo' {
-        $visualForm.Show();$visualForm.Navigate('Rendimiento');$watch=[Diagnostics.Stopwatch]::StartNew()
-        while($visualProvider.Calls -eq 0 -and $watch.ElapsedMilliseconds -lt 3000){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 5}
-        $visualProvider.Calls|Should Be 1;$visualProvider.LastAction|Should Be Read;$visualProvider.WriteCalls|Should Be 0
-        $visualProvider.Complete((New-VisualUiResult));$watch.Restart();while($visualController.IsBusy -and $watch.ElapsedMilliseconds -lt 3000){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 5}
-        $visualForm.Controls.Find('VisualMode',$true)[0].SelectedIndex|Should Be 0
+    It 'abrir Rendimiento no consulta el motor visual' {
+        $visualForm.Navigate('Rendimiento');$visualForm.Show();[Windows.Forms.Application]::DoEvents()
+        $visualProvider.Calls|Should Be 0;$visualProvider.WriteCalls|Should Be 0
     }
-    It 'el recomendado es predeterminado y cancelar una confirmación no escribe' {
-        Set-VisualUiResult (New-VisualUiResult)
-        $visualForm.Controls.Find('VisualMode',$true)[0].SelectedIndex|Should Be 0
-        $visualForm.Controls.Find('VisualApply',$true)[0].Accent|Should Be $true
-        $visualForm.RequestVisual('Quality')|Should Be $false;$visualConfirm.Calls|Should Be 1;$visualConfirm.LastMessage|Should Match 'mantiene el suavizado';$visualProvider.WriteCalls|Should Be 0
+    It 'la tarjeta solo contiene título descripción y acceso a Windows para <State>' -TestCases @(@{State='Custom'},@{State='Quality'},@{State='Maximum'},@{State='Unknown'},@{State='Partial'}) {
+        param($State)$r=New-VisualUiResult;$r.State=$State;$r.CanRestore=$true;Set-VisualUiResult $r
+        $card=$visualForm.Controls.Find('visual',$true)[0];$card.Controls.Count|Should Be 3
+        @($card.Controls|Where-Object Text -eq 'EFECTOS VISUALES').Count|Should Be 1
+        @($card.Controls|Where-Object Text -eq 'Administrá la apariencia y los efectos visuales de Windows.').Count|Should Be 1
+        $button=$card.Controls.Find('VisualWindows',$true)[0];$button.Text|Should Be 'Configurar en Windows';$button.Secondary|Should Be $true;$button.Accent|Should Be $false
+        $button.ContextMenuStrip|Should BeNullOrEmpty
+        foreach($name in @('VisualMode','VisualApply','VisualState','VisualRestore','VisualDetails')){@($card.Controls.Find($name,$true)).Count|Should Be 0}
     }
-    It 'avanzado identifica su efecto sobre la legibilidad y mantiene un solo botón principal' {
-        Set-VisualUiResult (New-VisualUiResult);$visualForm.Controls.Find('VisualMode',$true)[0].SelectedIndex=1
-        $visualForm.Controls.Find('VisualApply',$true)[0].Text|Should Be 'Aplicar Máximo rendimiento'
-        $visualForm.RequestVisual('Maximum')|Should Be $false;$visualConfirm.LastMessage|Should Match 'Desactiva el suavizado';$visualConfirm.LastMessage.Length|Should BeLessThan 180
-        $dialog=[Juno.Preview.TransparencyConfirmation]::CreateDialog($visualConfirm.LastTitle,$visualConfirm.LastMessage)
-        try{$dialog.AcceptButton.Text|Should Be Cancelar;$dialog.Height|Should BeLessThan 300}finally{$dialog.Dispose()}
+    It 'rechaza <Action> aun con CanApply y confirmación aceptada sin llamar al proveedor' -TestCases @(@{Action='Quality'},@{Action='Maximum'}) {
+        param($Action)Set-VisualUiResult (New-VisualUiResult);$visualConfirm.Accept=$true;$before=$visualProvider.Calls
+        $visualController.CanStart($Action)|Should Be $false;$visualForm.RequestVisual($Action)|Should Be $false
+        $visualProvider.Calls|Should Be $before;$visualProvider.WriteCalls|Should Be 0;$visualConfirm.Calls|Should Be 0
     }
-    It 'no repite preset vigente y ofrece restaurar solo cuando corresponde' -TestCases @(@{Restore=$true},@{Restore=$false}) {
-        param($Restore)
-        $r=New-VisualUiResult;$r.State='Quality';$r.CanRestore=$Restore;Set-VisualUiResult $r
-        @($visualForm.Controls.Find('VisualApply',$true)).Count|Should Be 0
-        @($visualForm.Controls.Find('VisualRestore',$true)).Count|Should Be ([int]$Restore)
-        $visualForm.RequestVisual('Quality')|Should Be $false;$visualConfirm.Calls|Should Be 0
+    It 'recuperación se ofrece únicamente en Restauración y si es segura: <Allowed>' -TestCases @(@{Allowed=$true},@{Allowed=$false}) {
+        param($Allowed)$r=New-VisualUiResult;$r.CanRestore=$Allowed;$r.Outcome='Failed';Set-VisualUiResult $r
+        @($visualForm.Controls.Find('VisualRestore',$true)).Count|Should Be 0
+        $visualForm.Navigate('Restauración');@($visualForm.Controls.Find('VisualRecoveryRead',$true)).Count|Should Be 1
+        @($visualForm.Controls.Find('VisualRestore',$true)).Count|Should Be ([int]$Allowed)
+        $tile=$visualForm.Controls.Find('VisualRecovery',$true)[0]
+        $message=@($tile.Controls[0].Controls|ForEach-Object Text) -join ' '
+        if($Allowed){$message|Should Not Match 'No se puede recuperar'}else{$message|Should Match 'No se puede recuperar'}
+        if($Allowed){$visualConfirm.Accept=$false;$visualForm.RequestVisual('Restore')|Should Be $false;$visualConfirm.Calls|Should Be 1;$visualProvider.WriteCalls|Should Be 0}
     }
-    It 'pendiente oculta la aplicación y ofrece una sola restauración' {
-        $r=New-VisualUiResult;$r.State='Partial';$r.CanApply=$false;$r.CanRestore=$true;$r.Pending=$true;Set-VisualUiResult $r
-        @($visualForm.Controls.Find('VisualApply',$true)).Count|Should Be 0
-        @($visualForm.Controls.Find('VisualRestore',$true)).Count|Should Be 1
-        $visualForm.Controls.Find('VisualRestore',$true)[0].Secondary|Should Be $true
-        $visualForm.RequestVisual('Quality')|Should Be $false;$visualProvider.WriteCalls|Should Be 0
+    It 'consulta de recuperación detecta conflicto sin restauración automática' {
+        $visualForm.Navigate('Restauración');$button=$visualForm.Controls.Find('VisualRecoveryRead',$true)[0]
+        [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
+        $visualProvider.LastAction|Should Be Read;$r=New-VisualUiResult;$r.Outcome='Conflict';$r.CanRestore=$false;$visualProvider.Complete($r);$visualController.Poll()|Out-Null
+        $visualForm.Navigate('Restauración');@($visualForm.Controls.Find('VisualRestore',$true)).Count|Should Be 0
+        $visualForm.RequestVisual('Restore')|Should Be $false;$visualProvider.WriteCalls|Should Be 0
+        $visualForm.Navigate('Rendimiento');$visualForm.Controls.Find('visual',$true)[0].Controls.Count|Should Be 3
     }
-    It 'escritura conserva estado previo, bloquea otras herramientas y cierre, y permite navegar' {
-        Set-VisualUiResult (New-VisualUiResult);$visualForm.Show();[Windows.Forms.Application]::DoEvents()
-        # Esperar la lectura inicial del proveedor de transparencia no configurado.
-        $watch=[Diagnostics.Stopwatch]::StartNew();while($visualForm.Transparency.IsBusy -and $watch.ElapsedMilliseconds -lt 3000){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 5}
-        $visualProvider.Next();$visualConfirm.Accept=$true;$visualForm.RequestVisual('Quality')|Should Be $true
-        $visualController.Snapshot.State|Should Be Custom;$visualForm.RequestVisual('Maximum')|Should Be $false;$visualForm.RequestPower('Read')|Should Be $false;$visualForm.RequestTransparency('Read')|Should Be $false
-        $visualForm.Controls.Find('VisualApply',$true)[0].Enabled|Should Be $false;$visualForm.Controls.Find('VisualMode',$true)[0].Enabled|Should Be $false
-        $visualForm.Close();$visualForm.IsDisposed|Should Be $false;$visualForm.Navigate('Inicio');$visualForm.Navigate('Aplicaciones')
-        $done=New-VisualUiResult;$done.State='Quality';$done.CanRestore=$true;$done.Outcome='Applied';$visualProvider.Complete($done)
-        $watch.Restart();while($visualController.IsBusy -and $watch.ElapsedMilliseconds -lt 3000){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 5}
-        $visualForm.Navigate('Rendimiento');$visualForm.Controls.Find('VisualRestore',$true)[0].Accent|Should Be $true;$visualProvider.WriteCalls|Should Be 1
+    It 'una recuperación pendiente bloquea Windows y otras herramientas y permite navegar' {
+        $r=New-VisualUiResult;$r.CanRestore=$true;Set-VisualUiResult $r;$visualProvider.Next();$visualConfirm.Accept=$true
+        $visualForm.RequestVisual('Restore')|Should Be $true;$visualForm.RequestPower('Read')|Should Be $false;$visualForm.RequestTransparency('Read')|Should Be $false
+        $button=$visualForm.Controls.Find('VisualWindows',$true)[0];$button.Enabled|Should Be $false
+        [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty));$visualSettings.Calls|Should Be 0
+        $visualForm.Navigate('Restauración');$visualForm.Controls.Find('VisualRecoveryRead',$true)[0].Enabled|Should Be $false
+        $visualProvider.Complete((New-VisualUiResult));$visualController.Poll()|Out-Null;$visualForm.Navigate('Rendimiento');$visualForm.Controls.Find('VisualWindows',$true)[0].Enabled|Should Be $true
     }
-    It 'detalles conservan el diagnóstico sin mostrarlo en la tarjeta' {
-        Set-VisualUiResult (New-VisualUiResult);$visualForm.Controls.Find('VisualState',$true)[0].Text|Should Not Match 'SPI|HKCU'
-        $details=$visualForm.CreateVisualDetails();try{$details.Controls.Find('TechnicalDetails',$true)[0].Text|Should Match 'SPI ficticio';$details.Controls.Find('VisualRead',$true)[0].Enabled|Should Be $true}finally{$details.Dispose()}
-    }
-    It 'Configurar en Windows conserva su comportamiento en la tarjeta visual' {
-        Set-VisualUiResult (New-VisualUiResult)
-        $card=$visualForm.Controls.Find('visual',$true)[0];$button=$card.Controls.Find('VisualWindows',$true)[0]
-        $button.Text|Should Be 'Configurar en Windows';$button.Secondary|Should Be $true;$button.Accent|Should Be $false
-        @($card.Controls.Find('VisualDetails',$true)).Count|Should Be 0
-        $button.ContextMenuStrip.Items['VisualRefreshMenu'].Text|Should Be 'Actualizar estado'
-        $button.ContextMenuStrip.Items['VisualDiagnosticsMenu'].Text|Should Be 'Diagnóstico'
-        @($visualForm.Controls.Find('PowerWindows',$true)).Count|Should Be 1
-        @($visualForm.Controls.Find('TransparencyWindows',$true)).Count|Should Be 1
-    }
-    It 'abrir Windows no confirma, consulta, aplica ni altera el estado o la restauración' {
-        $r=New-VisualUiResult;$r.CanRestore=$true;Set-VisualUiResult $r
-        $before=$visualController.Snapshot;$calls=$visualProvider.Calls
+    It 'abrir Windows no confirma ni consulta ni escribe ni cambia la recuperación' {
+        $r=New-VisualUiResult;$r.CanRestore=$true;Set-VisualUiResult $r;$before=$visualController.Snapshot;$calls=$visualProvider.Calls
         $button=$visualForm.Controls.Find('VisualWindows',$true)[0]
         [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
         $visualSettings.Calls|Should Be 1;$visualProvider.Calls|Should Be $calls;$visualProvider.WriteCalls|Should Be 0;$visualConfirm.Calls|Should Be 0
         [object]::ReferenceEquals($before,$visualController.Snapshot)|Should Be $true
-        $visualForm.Controls.Find('VisualRestore',$true)[0].Enabled|Should Be $true
-        $visualForm.Navigate('Inicio');$visualForm.Navigate('Rendimiento');$visualForm.SelectedSection|Should Be Rendimiento
+        $visualForm.Navigate('Inicio');$visualForm.Navigate('Restauración');$visualForm.Controls.Find('VisualRestore',$true)[0].Enabled|Should Be $true
     }
-    It 'un error de apertura es breve y conserva el diagnóstico completo sin cambiar elegibilidad' {
-        $r=New-VisualUiResult;$r.CanRestore=$true;Set-VisualUiResult $r;$visualSettings.Fail=$true
-        $button=$visualForm.Controls.Find('VisualWindows',$true)[0]
+    It 'el error de apertura queda en el pie y conserva el diagnóstico de solo lectura' {
+        Set-VisualUiResult (New-VisualUiResult);$visualSettings.Fail=$true;$button=$visualForm.Controls.Find('VisualWindows',$true)[0]
         [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-        $visualForm.Controls.Find('VisualState',$true)[0].Text|Should Be 'No se pudo abrir la configuración de Windows.'
-        $visualController.Snapshot.CanRestore|Should Be $true;$visualController.Snapshot.State|Should Be Custom;$visualProvider.WriteCalls|Should Be 0
+        $visualForm.Controls.Find('visual',$true)[0].Controls.Count|Should Be 3;$visualProvider.WriteCalls|Should Be 0
         $details=$visualForm.CreateVisualDetails();try{$details.Controls.Find('TechnicalDetails',$true)[0].Text|Should Match 'SIMULATED Windows settings launch failure'}finally{$details.Dispose()}
     }
-    It 'no abre Windows durante una operación visual incluso ante un evento programático' {
-        Set-VisualUiResult (New-VisualUiResult);$visualProvider.Next();$visualConfirm.Accept=$true;$visualForm.RequestVisual('Quality')|Should Be $true
-        $button=$visualForm.Controls.Find('VisualWindows',$true)[0];$button.Enabled|Should Be $false
-        [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-        $visualSettings.Calls|Should Be 0;$visualProvider.WriteCalls|Should Be 1
+    It 'tarjeta compacta sin desbordamientos en ancho <Width>' -TestCases @(@{Width=1180},@{Width=940},@{Width=700}) {
+        param($Width)Set-VisualUiResult (New-VisualUiResult);$visualForm.ClientSize=New-Object Drawing.Size($Width,650);$visualForm.PerformLayout()
+        $card=$visualForm.Controls.Find('visual',$true)[0];$card.Height|Should BeLessThan 190
+        foreach($control in $card.Controls){($control.Right -le $card.ClientSize.Width)|Should Be $true;($control.Bottom -le $card.ClientSize.Height)|Should Be $true
+            foreach($other in $card.Controls){if($other -ne $control){$control.Bounds.IntersectsWith($other.Bounds)|Should Be $false}}}
+        $visualForm.Navigate('Mantenimiento');@($visualForm.Controls.Find('CleanupWindows',$true)).Count|Should Be 1;@($visualForm.Controls.Find('DiskWindows',$true)).Count|Should Be 1
     }
-    It 'actualizar desde el menú detecta un conflicto simulado sin restaurar automáticamente' {
-        $r=New-VisualUiResult;$r.CanRestore=$true;Set-VisualUiResult $r
-        $button=$visualForm.Controls.Find('VisualWindows',$true)[0]
-        [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-        $visualProvider.Next();$visualForm.Controls.Find('VisualWindows',$true)[0].ContextMenuStrip.Items['VisualRefreshMenu'].PerformClick()
-        $visualProvider.LastAction|Should Be Read;$visualProvider.WriteCalls|Should Be 0
-        $conflict=New-VisualUiResult;$conflict.Outcome='Conflict';$conflict.CanApply=$false;$conflict.CanRestore=$false;$conflict.Message='Cambio manual simulado fuera de JUNO'
-        $visualProvider.Complete($conflict);$visualController.Poll()|Out-Null;$visualForm.Navigate('Rendimiento')
-        @($visualForm.Controls.Find('VisualApply',$true)).Count|Should Be 0
-        @($visualForm.Controls.Find('VisualRestore',$true)).Count|Should Be 0
-        $visualForm.Controls.Find('VisualState',$true)[0].Text|Should Match 'cambió fuera de JUNO';$visualConfirm.Calls|Should Be 0;$visualProvider.WriteCalls|Should Be 0
+    It 'la interfaz clásica solo abre Windows y conserva la restauración' {
+        $source=[IO.File]::ReadAllText((Join-Path $visualRoot 'Juno.ps1'))
+        $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+        @($ast.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('Apply-VisualEffects','Invoke-JunoVisual')},$true)).Count|Should Be 0
+        $source|Should Not Match '\$btnVisual(Font)?\b'
+        $source|Should Match 'Restore-VisualEffects';$source|Should Match "Get-JunoSystemTool 'SystemPropertiesPerformance.exe'"
     }
-    It 'el menú contextual permite abrir el diagnóstico sin el botón retirado' {
-        Set-VisualUiResult (New-VisualUiResult)
-        $global:JunoVisualDiagnosticObserved=$null;$timer=New-Object Windows.Forms.Timer;$timer.Interval=100
-        $timer.Add_Tick({
-            $dialogs=@([Windows.Forms.Application]::OpenForms|Where-Object{$_.Name -eq 'VisualDetailsDialog'})
-            if($dialogs.Count -eq 0){return};$dialog=$dialogs[0]
-            $global:JunoVisualDiagnosticObserved=$dialog.Controls.Find('TechnicalDetails',$true)[0].Text
-            $dialog.DialogResult=[Windows.Forms.DialogResult]::Cancel;$dialog.Close()
-        })
-        try{$timer.Start();$visualForm.Controls.Find('VisualWindows',$true)[0].ContextMenuStrip.Items['VisualDiagnosticsMenu'].PerformClick();$global:JunoVisualDiagnosticObserved|Should Match 'SPI ficticio';$visualProvider.WriteCalls|Should Be 0}finally{$timer.Stop();$timer.Dispose()}
-    }
-    It 'F5 con foco en la tarjeta actualiza mediante la consulta existente' {
-        Set-VisualUiResult (New-VisualUiResult);$visualForm.Show();$watch=[Diagnostics.Stopwatch]::StartNew()
-        while($visualForm.Transparency.IsBusy -and $watch.ElapsedMilliseconds -lt 3000){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 5}
-        $button=$visualForm.Controls.Find('VisualWindows',$true)[0];$button.Focus()|Should Be $true
-        [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-        $button.IsDisposed|Should Be $false;$visualSettings.Calls|Should Be 1;$visualProvider.Next()
-        $message=[Windows.Forms.Message]::Create($visualForm.Handle,0,[IntPtr]::Zero,[IntPtr]::Zero)
-        $args=[object[]]@($message,[Windows.Forms.Keys]::F5)
-        $visualForm.GetType().GetMethod('ProcessCmdKey',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($visualForm,$args)|Should Be $true
-        $visualProvider.LastAction|Should Be Read;$visualController.IsBusy|Should Be $true;$visualProvider.WriteCalls|Should Be 0
-    }
-    It 'los botones conservan sus límites con restauración y ventana estrecha' -TestCases @(@{Width=1180},@{Width=940},@{Width=700}) {
-        param($Width)
-        $r=New-VisualUiResult;$r.CanRestore=$true;Set-VisualUiResult $r;$visualForm.ClientSize=New-Object Drawing.Size($Width,650);$visualForm.PerformLayout()
-        foreach($name in @('VisualWindows','VisualRestore')){
-            $button=$visualForm.Controls.Find($name,$true)[0]
-            ($button.Right -le $button.Parent.ClientSize.Width)|Should Be $true;($button.Bottom -le $button.Parent.ClientSize.Height)|Should Be $true
-            foreach($other in $button.Parent.Controls){if($other -ne $button){$button.Bounds.IntersectsWith($other.Bounds)|Should Be $false}}
-        }
-    }
-    It 'error borra elegibilidad anterior y permite consultar sin escrituras' {
-        Set-VisualUiResult (New-VisualUiResult);$visualProvider.Next();$visualController.Start('Read',$visualConfirm)|Out-Null;$visualProvider.Completion.TrySetException([InvalidOperationException]::new('SIMULATED'))|Out-Null;$visualController.Poll()|Out-Null;$visualForm.Navigate('Rendimiento')
-        @($visualForm.Controls.Find('VisualApply',$true)).Count|Should Be 0;$visualController.CanStart('Read')|Should Be $true;$visualController.Status|Should Match 'No se pudo completar';$visualProvider.WriteCalls|Should Be 0
-    }
-    It 'cierre durante una lectura libera la vista sin cancelar el proveedor' {
+    It 'cierre durante lectura no cancela el proveedor ni escribe' {
         $visualForm.RequestVisual('Read')|Should Be $true;$visualForm.Dispose();$visualProvider.Disposed|Should Be $true;$visualProvider.Complete((New-VisualUiResult));$visualController.Poll()|Should Be $false;$visualProvider.WriteCalls|Should Be 0
     }
 }

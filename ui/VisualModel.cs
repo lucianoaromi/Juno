@@ -85,6 +85,8 @@ Get-JunoSystemTool 'SystemPropertiesPerformance.exe'
         public bool CanStart(VisualAction requested)
         {
             if(disposed||deciding||IsBusy||!Enum.IsDefined(typeof(VisualAction),requested))return false;
+            // Suspensión de nuevos perfiles: la recuperación conserva su autorización original.
+            if(requested==VisualAction.Quality||requested==VisualAction.Maximum)return false;
             return requested==VisualAction.Read||(requested==VisualAction.Restore?Snapshot.CanRestore:Snapshot.CanApply&&Snapshot.State!=requested.ToString());
         }
         public bool Start(VisualAction requested,ITransparencyConfirmation confirmation)

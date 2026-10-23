@@ -339,7 +339,6 @@ namespace Juno.Preview
         private readonly VisualController visual;
         private readonly Timer visualTimer;
         private bool reviewingVisual;
-        private VisualAction visualMode=VisualAction.Quality;
         private readonly IVisualSettingsLauncher visualSettings;
         private string visualWindowsFailure,visualWindowsDiagnostic;
         public VisualController Visual {get{return visual;}}
@@ -529,7 +528,6 @@ namespace Juno.Preview
             LayoutPage();
             if(section=="Rendimiento"&&Visible&&!transparency.HasRequested)RequestTransparency(TransparencyAction.Read);
             if(section=="Rendimiento"&&Visible&&power.IsConfigured&&!power.HasRequested&&!transparency.IsBusy)RequestPower(PowerAction.Read);
-            if(section=="Rendimiento"&&Visible&&visual.IsConfigured&&!visual.HasRequested&&!transparency.IsBusy&&!power.IsBusy)RequestVisual(VisualAction.Read);
         }
         private void BuildHome()
         {
@@ -561,8 +559,8 @@ namespace Juno.Preview
             page.Controls.Add(Intro("RENDIMIENTO","Configuración de rendimiento","Elegí qué ajustar. Cada herramienta conserva su configuración anterior para restaurarla."));
             TileGrid grid=Grid(2);
             BuildPower(grid);
-            BuildVisual(grid);
             BuildTransparency(grid);page.Controls.Add(grid);
+            BuildVisual();
         }
         private void BuildApps()
         {
@@ -616,6 +614,22 @@ namespace Juno.Preview
         private void BuildRecovery()
         {
             page.Controls.Add(new RecoverySection(recovery,scale,normal,bold,!StartupBlocked,()=>RequestRecovery(null),id=>RequestRecovery(id)));
+            // Fuera de la tarjeta de configuración: solo recuperación histórica, nunca perfiles nuevos.
+            if(visual.IsConfigured){
+                VisualResult value=visual.Snapshot;
+                string message=!visual.HasRequested?"Consultá si JUNO conserva una configuración visual anterior.":
+                    visual.IsBusy?"Revisando recuperación visual…":
+                    value.Outcome=="Conflict"?"La configuración cambió fuera de JUNO. Se conserva el respaldo; restauración bloqueada.":
+                    (!value.CanRestore&&value.Outcome=="Failed")||!String.IsNullOrEmpty(value.BackupIssue)?"No se puede recuperar con seguridad. Se conserva el respaldo.":
+                    value.CanRestore?"Podés restaurar la configuración anterior con las comprobaciones de seguridad de JUNO.":"No hay una configuración visual anterior disponible para restaurar.";
+                Tile tile=new Tile("VisualRecovery","Efectos visuales anteriores",message,normal,bold,metric,null,false,scale);
+                PreviewButton read=ToolButton("VisualRecoveryRead","Consultar respaldo",false,!StartupBlocked);read.Click+=delegate{RequestVisual(VisualAction.Read);};tile.AddContent(read);
+                if(visual.CanStart(VisualAction.Restore)){
+                    PreviewButton restore=ToolButton("VisualRestore","Restaurar anterior",false,!StartupBlocked);
+                    restore.Click+=delegate{RequestVisual(VisualAction.Restore);};tile.AddContent(restore);
+                }
+                page.Controls.Add(tile);
+            }
         }
         public bool RequestRecovery(string id)
         {
@@ -706,7 +720,6 @@ namespace Juno.Preview
             status.Text=ToolsStatus;
             // Lecturas iniciales secuenciales: ambos servicios comparten el mismo mutex.
             if(SelectedSection=="Rendimiento"&&Visible&&power.IsConfigured&&!power.HasRequested&&!transparency.IsBusy)RequestPower(PowerAction.Read);
-            if(SelectedSection=="Rendimiento"&&Visible&&visual.IsConfigured&&!visual.HasRequested&&!transparency.IsBusy&&!power.IsBusy)RequestVisual(VisualAction.Read);
         }
         private string ToolsStatus {get{return recovery.IsBusy?"Restauración · "+recovery.Status:startup.IsBusy?"Programas de inicio · "+startup.Status:visual.IsBusy?"Efectos visuales · "+visual.Status:power.IsBusy?"Energía · "+power.Status:transparency.IsBusy?"Transparencia · "+transparency.Status:"Dashboard de solo lectura · Energía, efectos visuales, transparencia e inicio integrados";}}
         public bool RequestPower(PowerAction action)
@@ -773,51 +786,15 @@ namespace Juno.Preview
             visualWindowsFailure=null;
             bool started;requestingTool=true;try{started=visual.Start(action,transparencyConfirmation);}finally{requestingTool=false;}RefreshTransparencyView();if(started)visualTimer.Start();return started;
         }
-        private void BuildVisual(TileGrid grid)
+        private void BuildVisual()
         {
-            VisualResult value=visual.Snapshot;
-            Tile tile=new Tile("visual","Efectos visuales","",normal,bold,metric,VisualController.StateText(value.State),false,scale);
-            Label state=Tile.MakeLabel(visualWindowsFailure??visual.Status,normal,Colors.Muted);state.Name="VisualState";tile.AddContent(state);
-            ComboBox mode=new ComboBox{Name="VisualMode",Font=normal,DropDownStyle=ComboBoxStyle.DropDownList,DrawMode=DrawMode.OwnerDrawFixed,ItemHeight=normal.Height+4,BackColor=Colors.Card,ForeColor=Colors.Text,FlatStyle=FlatStyle.Flat,Enabled=!startup.IsBusy&&!visual.IsBusy&&!power.IsBusy&&!transparency.IsBusy&&value.CanApply,DropDownWidth=(int)(340*scale)};
-            mode.DrawItem+=delegate(object sender,DrawItemEventArgs e){if(e.Index<0)return;using(SolidBrush background=new SolidBrush(Colors.Card)){e.Graphics.FillRectangle(background,e.Bounds);}TextRenderer.DrawText(e.Graphics,mode.Items[e.Index].ToString(),normal,e.Bounds,mode.Enabled?Colors.Text:Colors.Muted,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPrefix);if((e.State&DrawItemState.Focus)!=0)ControlPaint.DrawFocusRectangle(e.Graphics,e.Bounds,Colors.Muted,Colors.Card);};
-            mode.Items.Add("Rendimiento + letras nítidas");mode.Items.Add("Máximo rendimiento (avanzado)");mode.SelectedIndex=visualMode==VisualAction.Maximum?1:0;
-            mode.AccessibleName="Modo de efectos visuales";mode.AccessibleDescription="Rendimiento + letras nítidas es la opción recomendada.";
-            mode.SelectedIndexChanged+=delegate{visualMode=mode.SelectedIndex==1?VisualAction.Maximum:VisualAction.Quality;RefreshTransparencyView();};tile.AddContent(mode);
-            tile.AddContent(Tile.MakeLabel(visualMode==VisualAction.Maximum?"Puede reducir la legibilidad de las letras.":"Recomendado: mantiene el suavizado de las letras.",small,Colors.Muted));
-            bool current=value.State==visualMode.ToString();
-            if(!current&&value.CanApply){PreviewButton apply=ToolButton("VisualApply",visualMode==VisualAction.Maximum?"Aplicar Máximo rendimiento":"Optimizar efectos visuales",!value.Pending,!power.IsBusy&&!transparency.IsBusy&&visual.CanStart(visualMode));apply.Click+=delegate{RequestVisual(visualMode);};tile.AddContent(apply);}
-            else if(current&&value.CanRestore){PreviewButton restore=ToolButton("VisualRestore","Restaurar anterior",true,!power.IsBusy&&!transparency.IsBusy&&visual.CanStart(VisualAction.Restore));restore.Click+=delegate{RequestVisual(VisualAction.Restore);};tile.AddContent(restore);}
-            ToolActions row=new ToolActions(scale);
-            if(!current&&value.CanRestore){PreviewButton restore=ToolButton("VisualRestore","Restaurar anterior",false,!power.IsBusy&&!transparency.IsBusy&&visual.CanStart(VisualAction.Restore));restore.Click+=delegate{RequestVisual(VisualAction.Restore);};row.Controls.Add(restore);}
-            PreviewButton windows=ToolButton("VisualWindows","Configurar en Windows",false,!visual.IsBusy&&!power.IsBusy&&!transparency.IsBusy);
-            windows.AccessibleDescription="Abrir Efectos visuales de Windows. F5 actualiza el estado; F1 abre el diagnóstico. También disponibles en el menú contextual.";
-            windows.Click+=delegate{OpenVisualWindows();};row.Controls.Add(windows);tile.AddContent(row);
-            ToolTip hint=new ToolTip();hint.SetToolTip(windows,windows.AccessibleDescription);windows.Disposed+=delegate{hint.Dispose();};
-            ContextMenuStrip menu=new ContextMenuStrip{BackColor=Colors.Card,ForeColor=Colors.Text};
-            ToolStripMenuItem refresh=new ToolStripMenuItem("Actualizar estado"){Name="VisualRefreshMenu",ShortcutKeyDisplayString="F5",Enabled=!visual.IsBusy&&!power.IsBusy&&!transparency.IsBusy};refresh.Click+=delegate{RequestVisual(VisualAction.Read);};
-            ToolStripMenuItem diagnostics=new ToolStripMenuItem("Diagnóstico"){Name="VisualDiagnosticsMenu",ShortcutKeyDisplayString="F1"};diagnostics.Click+=delegate{ShowVisualDiagnostics();};menu.Items.Add(refresh);menu.Items.Add(diagnostics);
-            Action<Control> attach=null;attach=control=>{control.ContextMenuStrip=menu;foreach(Control child in control.Controls)attach(child);};attach(tile);
-            tile.Disposed+=delegate{menu.Dispose();};grid.Controls.Add(tile);
+            page.Controls.Add(new WindowsSettingsSection("visual","EFECTOS VISUALES","Administrá la apariencia y los efectos visuales de Windows.","VisualWindows","Configurar en Windows",230,scale,normal,bold,!StartupBlocked,OpenVisualWindows));
         }
         private void OpenVisualWindows()
         {
-            if(startup.IsBusy||reviewingStartup)return;
-            if(visual.IsBusy||power.IsBusy||transparency.IsBusy||reviewingVisual||reviewingPower||reviewingTransparency)return;
-            try{visualSettings.Open();visualWindowsFailure=null;}
-            catch(Exception error){visualWindowsFailure="No se pudo abrir la configuración de Windows.";visualWindowsDiagnostic=error.ToString();}
-            Control[] states=Controls.Find("VisualState",true);if(states.Length==1)states[0].Text=visualWindowsFailure??visual.Status;
-            LayoutPage();
-        }
-        private void ShowVisualDiagnostics()
-        {using(Form dialog=CreateVisualDetails()){if(dialog.ShowDialog(this)==DialogResult.Retry)RequestVisual(VisualAction.Read);}}
-        protected override bool ProcessCmdKey(ref Message msg,Keys keyData)
-        {
-            Control[] cards=Controls.Find("visual",true);
-            if(SelectedSection=="Rendimiento"&&cards.Length==1&&cards[0].ContainsFocus){
-                if(keyData==Keys.F5){RequestVisual(VisualAction.Read);return true;}
-                if(keyData==Keys.F1){ShowVisualDiagnostics();return true;}
-            }
-            return base.ProcessCmdKey(ref msg,keyData);
+            if(StartupBlocked)return;
+            try{visualSettings.Open();visualWindowsFailure=null;status.Text=ToolsStatus;}
+            catch(Exception error){visualWindowsFailure="No se pudo abrir la configuración de Windows.";visualWindowsDiagnostic=error.ToString();status.Text=visualWindowsFailure;}
         }
         public Form CreateVisualDetails()
         {
@@ -884,7 +861,6 @@ namespace Juno.Preview
             base.OnShown(e);LayoutPage();if(!dashboard.HasRequested)RefreshInformation();
             if(SelectedSection=="Rendimiento"&&!transparency.HasRequested)RequestTransparency(TransparencyAction.Read);
             if(SelectedSection=="Rendimiento"&&power.IsConfigured&&!power.HasRequested&&!transparency.IsBusy)RequestPower(PowerAction.Read);
-            if(SelectedSection=="Rendimiento"&&visual.IsConfigured&&!visual.HasRequested&&!transparency.IsBusy&&!power.IsBusy)RequestVisual(VisualAction.Read);
         }
         protected override void Dispose(bool disposing)
         {

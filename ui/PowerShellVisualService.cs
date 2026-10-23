@@ -38,6 +38,7 @@ namespace Juno.Preview
             lock(gate){
                 if(disposed||!Enum.IsDefined(typeof(VisualAction),action))return Task.FromResult(VisualResult.Failure("Solicitud no disponible."));
                 if(action!=VisualAction.Read&&!confirmed)return Task.FromResult(new VisualResult{Outcome="Cancelled",Message="Solicitud sin confirmación. No se escribió."});
+                if(action==VisualAction.Quality||action==VisualAction.Maximum)return Task.FromResult(VisualResult.Failure("Los perfiles visuales de JUNO están suspendidos. Configurá los efectos en Windows."));
                 if(Interlocked.CompareExchange(ref active,1,0)!=0)return Task.FromResult(new VisualResult{Outcome="Busy",Message="Otra operación está en curso."});
             }
             return Task.Run(()=>{

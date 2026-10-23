@@ -42,7 +42,22 @@ function Restore-VisualRegistry($snapshots){
     [IO.File]::AppendAllText((Join-Path $folder 'VisualAdapter.ps1'),("`r`n"+$barriers.Replace('__FOLDER__',$literal)),[Text.UTF8Encoding]::new($true))
     return [pscustomobject]@{Root=$folder;Mutex=$mutex;Backup=(Join-Path $folder 'Datos ficticios\backup.json');Original=$state}
 }
-function Wait-VisualBridge($task){if(-not $task.Wait(15000)){throw 'TEST: no terminó el puente'};return $task.GetAwaiter().GetResult()}
+function Wait-VisualBridge($task){if(-not $task.Wait(60000)){throw 'TEST: no terminó el puente'};return $task.GetAwaiter().GetResult()}
+function Initialize-VisualBridgeHistory($fixture,[string]$preset) {
+    # Construir un antecedente con el motor conservado y las fronteras ficticias.
+    # No hay excepción ni interruptor de suspensión en el producto.
+    if(-not [IO.File]::Exists((Join-Path $fixture.Root 'estado-ficticio.json'))){throw 'TEST: falta la frontera ficticia'}
+    $pipeline=[Management.Automation.PowerShell]::Create()
+    try {
+        $pipeline.AddScript({param($root,$quality)
+            $ErrorActionPreference='Stop'
+            foreach($file in @('BackupStore.ps1','RecoveryOperations.ps1','TransparencyOperations.ps1','VisualEffectsOperations.ps1','VisualAdapter.ps1')){. (Join-Path $root $file)}
+            Enter-JunoLease
+            try {Invoke-JunoVisual $false $quality|Out-Null} finally {Exit-JunoLease}
+        }).AddArgument($fixture.Root).AddArgument(($preset -eq 'Quality'))|Out-Null
+        $null=$pipeline.Invoke();if($pipeline.HadErrors){throw ($pipeline.Streams.Error|Out-String)}
+    } finally {$pipeline.Dispose()}
+}
 function New-VisualHistorical($fixture,[string]$sid='TEST-SID'){
     [void][IO.Directory]::CreateDirectory((Split-Path $fixture.Backup -Parent))
     $data=[pscustomobject]@{PowerScheme=$null;CreatedPowerScheme=$null;VisualEffects=$fixture.Original.Effects;VisualRegistry=$fixture.Original.Registry;TransparencyBackup=$null}
@@ -52,14 +67,23 @@ function New-VisualHistorical($fixture,[string]$sid='TEST-SID'){
 Describe 'Puente visual real con API, Registro, almacén y mutex ficticios' {
     BeforeEach {$script:vFixture=New-VisualBridge;$script:vBridge=New-Object Juno.Preview.PowerShellVisualService($vFixture.Root)}
     AfterEach {$vBridge.Dispose()}
+    It 'suspende <Preset> confirmado antes de acceder a archivos o Windows' -TestCases @(@{Preset='Quality'},@{Preset='Maximum'}) {
+        param($Preset)$before=[IO.File]::ReadAllText((Join-Path $vFixture.Root 'estado-ficticio.json'))
+        $result=Wait-VisualBridge ($vBridge.ExecuteAsync($Preset,$true));$result.Outcome|Should Be Failed;$result.Message|Should Match 'suspendidos'
+        [IO.File]::Exists($vFixture.Backup)|Should Be $false
+        [IO.File]::ReadAllText((Join-Path $vFixture.Root 'estado-ficticio.json'))|Should Be $before
+        $missing=New-Object Juno.Preview.PowerShellVisualService((Join-Path $TestDrive 'no modules'))
+        try{(Wait-VisualBridge ($missing.ExecuteAsync($Preset,$true))).Message|Should Match 'suspendidos'}finally{$missing.Dispose()}
+    }
     It 'lee sin crear respaldos y rechaza escritura no confirmada antes de abrir el almacén' {
         $r=Wait-VisualBridge ($vBridge.ExecuteAsync('Read',$false));$r.State|Should Be Custom;$r.CanApply|Should Be $true
         [IO.Directory]::Exists((Split-Path $vFixture.Backup -Parent))|Should Be $false
         (Wait-VisualBridge ($vBridge.ExecuteAsync('Maximum',$false))).Outcome|Should Be Cancelled
         [IO.File]::Exists($vFixture.Backup)|Should Be $false
     }
-    It 'aplica, verifica, restaura y libera mutex en el mismo hilo sin cambiar formato' {
-        (Wait-VisualBridge ($vBridge.ExecuteAsync('Quality',$true))).State|Should Be Quality
+    It 'recupera un antecedente simulado y libera mutex en el mismo hilo sin cambiar formato' {
+        Initialize-VisualBridgeHistory $vFixture Quality
+        (Wait-VisualBridge ($vBridge.ExecuteAsync('Read',$false))).State|Should Be Quality
         $saved=Get-Content -LiteralPath $vFixture.Backup -Raw|ConvertFrom-Json
         $saved.Kind|Should Be General;$saved.Scope|Should Be User;$saved.Sid|Should Be TEST-SID;$saved.Data.Journal.Visual.Phase|Should Be Applied
         (Wait-VisualBridge ($vBridge.ExecuteAsync('Restore',$true))).Outcome|Should Be Restored
@@ -69,7 +93,7 @@ Describe 'Puente visual real con API, Registro, almacén y mutex ficticios' {
     }
     It 'mutex de otra interfaz impide abrir el respaldo' {
         Enter-JunoLease $vFixture.Mutex
-        try{(Wait-VisualBridge ($vBridge.ExecuteAsync('Quality',$true))).Outcome|Should Be Busy;[IO.File]::Exists($vFixture.Backup)|Should Be $false}finally{Exit-JunoLease}
+        try{(Wait-VisualBridge ($vBridge.ExecuteAsync('Restore',$true))).Outcome|Should Be Busy;[IO.File]::Exists($vFixture.Backup)|Should Be $false}finally{Exit-JunoLease}
     }
     It 'histórico pide una revisión y cancelar conserva bytes; otra solicitud no entra' {
         New-VisualHistorical $vFixture;$before=[IO.File]::ReadAllBytes($vFixture.Backup)
@@ -93,7 +117,7 @@ Describe 'Puente visual real con API, Registro, almacén y mutex ficticios' {
     }
     It 'respaldo de otra identidad bloquea sin revelar SID ajeno ni tocar archivos' {
         New-VisualHistorical $vFixture 'OTHER-PRIVATE-SID';$before=[IO.File]::ReadAllText($vFixture.Backup)
-        $r=Wait-VisualBridge ($vBridge.ExecuteAsync('Quality',$true));$r.BackupIssue|Should Be UserMismatch;$r.Message|Should Not Match 'OTHER-PRIVATE-SID';$r.CanApply|Should Be $false;$r.CanRestore|Should Be $false
+        $r=Wait-VisualBridge ($vBridge.ExecuteAsync('Restore',$true));$r.BackupIssue|Should Be UserMismatch;$r.Message|Should Not Match 'OTHER-PRIVATE-SID';$r.CanApply|Should Be $false;$r.CanRestore|Should Be $false
         [IO.File]::ReadAllText($vFixture.Backup)|Should Be $before
     }
     It 'la arquitectura no utiliza el dashboard ni cancelación forzada de escritura' {

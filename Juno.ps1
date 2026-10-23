@@ -141,18 +141,14 @@ $panelPower.Controls.Add($btnPower)
 $panelPower.Controls.Add($btnPlans)
 $scrollHost.Controls.Add($panelPower)
 
-$panelVisual = New-Panel 22 132 666 162
+$panelVisual = New-Panel 22 132 666 116
 $panelVisual.Controls.Add((New-Label '2. Efectos visuales' 17 7 600 28 15 $true $white))
-$panelVisual.Controls.Add((New-Label 'Desactiva animaciones y efectos. Guarda la configuracion anterior.' 17 36 630 25 10 $false $muted))
-$btnVisual = New-Button 'Maximo rendimiento (todo OFF)' 17 68 302 35 $blue
-$btnVisualFont = New-Button 'Rendimiento + letras nitidas' 334 68 313 35 $green
-$btnVisualCheck = New-Button 'Ver efectos en Windows (comprobar)' 17 115 630 35 $gray
-$panelVisual.Controls.Add($btnVisual)
-$panelVisual.Controls.Add($btnVisualFont)
+$panelVisual.Controls.Add((New-Label 'Administrá la apariencia y los efectos visuales de Windows.' 17 36 630 25 10 $false $muted))
+$btnVisualCheck = New-Button 'Configurar en Windows' 17 70 300 35 $gray
 $panelVisual.Controls.Add($btnVisualCheck)
 $scrollHost.Controls.Add($panelVisual)
 
-$panelTransparency = New-Panel 22 304 666 119
+$panelTransparency = New-Panel 22 258 666 119
 $panelTransparency.Controls.Add((New-Label '3. Transparencia de Windows' 17 7 630 27 15 $true $white))
 $lblTransparency = New-Label 'Estado de transparencia: consultando...' 17 36 630 24 10 $false $muted
 $panelTransparency.Controls.Add($lblTransparency)
@@ -166,7 +162,7 @@ $scrollHost.Controls.Add($panelTransparency)
 
 # Tarjeta 4: solo gestiona programas de inicio.
 # La restauracion de ajustes generales se muestra al FINAL, fuera de los modulos.
-$panelTools = New-Panel 22 433 666 113
+$panelTools = New-Panel 22 387 666 113
 $panelTools.Controls.Add((New-Label '4. Programas de inicio' 17 7 630 28 15 $true $white))
 $panelTools.Controls.Add((New-Label 'Elige que aplicaciones se inician con Windows.' 17 36 630 25 10 $false $muted))
 $btnStartup = New-Button 'Administrar programas de inicio' 17 70 630 35 $blue
@@ -174,7 +170,7 @@ $panelTools.Controls.Add($btnStartup)
 $scrollHost.Controls.Add($panelTools)
 
 # Tarjeta 5: dos tareas DIFERENTES: permisos persistentes y procesos activos.
-$panelBackground = New-Panel 22 556 666 163
+$panelBackground = New-Panel 22 510 666 163
 $panelBackground.Controls.Add((New-Label '5. Aplicaciones en segundo plano' 17 7 630 28 15 $true $white))
 $panelBackground.Controls.Add((New-Label 'Configura permisos futuros o revisa procesos activos. Son funciones diferentes.' 17 36 630 25 10 $false $muted))
 $btnPermissions = New-Button 'Revisar permisos de segundo plano' 17 70 630 36 $green
@@ -184,14 +180,14 @@ $panelBackground.Controls.Add($btnBackground)
 $scrollHost.Controls.Add($panelBackground)
 
 # Tarjeta 6: solo abre el analizador, sin borrar nada al iniciar.
-$panelCleanup = New-Panel 22 729 666 120
+$panelCleanup = New-Panel 22 683 666 120
 $panelCleanup.Controls.Add((New-Label '6. Limpieza inteligente' 17 7 630 28 15 $true $white))
 $panelCleanup.Controls.Add((New-Label 'Consulta temporales y revisa la limpieza en Windows. JUNO no borra archivos.' 17 36 630 25 10 $false $muted))
 $btnCleanup = New-Button 'Analizar temporales y revisar en Windows' 17 70 630 36 $blue
 $panelCleanup.Controls.Add($btnCleanup)
 $scrollHost.Controls.Add($panelCleanup)
 # Tarjeta 7: diagnostico de almacenamiento (no aplica cambios al abrir).
-$panelDisks = New-Panel 22 859 666 120
+$panelDisks = New-Panel 22 813 666 120
 $panelDisks.Controls.Add((New-Label '7. Almacenamiento SSD / HDD' 17 7 630 28 15 $true $white))
 $panelDisks.Controls.Add((New-Label 'Consulta salud, TRIM y mantenimiento. Optimiza solo si lo confirmas.' 17 36 630 25 10 $false $muted))
 $btnDisks = New-Button 'Diagnostico y optimizacion de discos' 17 70 630 36 $blue
@@ -199,14 +195,14 @@ $panelDisks.Controls.Add($btnDisks)
 $scrollHost.Controls.Add($panelDisks)
 # Restauracion global de ajustes BASICOS: al final y fuera de las tarjetas numeradas.
 # No afecta a los respaldos independientes de inicio, segundo plano o TRIM.
-$panelRestore = New-Panel 22 989 666 145
+$panelRestore = New-Panel 22 943 666 145
 $panelRestore.Controls.Add((New-Label 'Restauracion de ajustes generales' 17 7 630 28 15 $true $white))
 $panelRestore.Controls.Add((New-Label 'Revierte solo energia, efectos visuales y transparencia guardados.' 17 36 630 24 10 $false $muted))
 $panelRestore.Controls.Add((New-Label 'Inicio, segundo plano y TRIM se restauran por separado. La limpieza no se deshace.' 17 62 630 24 9 $false $muted))
 $btnRestore = New-Button 'Restaurar energia, efectos y transparencia' 17 95 630 36 $gray
 $panelRestore.Controls.Add($btnRestore)
 $scrollHost.Controls.Add($panelRestore)
-$scrollHost.AutoScrollMinSize = New-Object System.Drawing.Size(0, 1150)
+$scrollHost.AutoScrollMinSize = New-Object System.Drawing.Size(0, 1104)
 
 $status = New-Label 'Estado: listo. Ningun cambio se aplica automaticamente.' 26 632 665 24 10 $false $white
 $form.Controls.Add($status)
@@ -235,14 +231,6 @@ $btnPower.Add_Click({
     catch { Show-Result ("Operacion de energia pendiente o fallida: $($_.Exception.Message)`n`nRevisa el plan activo antes de reintentar. Modern Standby puede limitar los planes disponibles.") $true }
 })
 $btnPlans.Add_Click({try {Start-Process (Get-JunoSystemTool 'control.exe') -ArgumentList 'powercfg.cpl'}catch {Show-Result $_.Exception.Message $true}})
-$btnVisual.Add_Click({
-    try { Show-Result (Apply-VisualEffects $false) $false }
-    catch { Show-Result ("Ajuste visual pendiente o fallido: $($_.Exception.Message)") $true }
-})
-$btnVisualFont.Add_Click({
-    try { Show-Result (Apply-VisualEffects $true) $false }
-    catch { Show-Result ("Ajuste visual pendiente o fallido: $($_.Exception.Message)") $true }
-})
 $btnVisualCheck.Add_Click({try {Start-Process (Get-JunoSystemTool 'SystemPropertiesPerformance.exe')}catch {Show-Result $_.Exception.Message $true}})
 $btnTransOff.Add_Click({
     try { Show-Result (Set-Transparency $false) $false }

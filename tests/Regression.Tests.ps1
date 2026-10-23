@@ -126,7 +126,7 @@ Describe 'Integracion WinForms sin cambios en los siete modulos' {
     It 'botones de energia y efectos informan herramienta ausente sin excepcion de evento' {
         $global:JunoRegressionAction={param($form)
             $panel=@($form.Controls|Where-Object{$_ -is [Windows.Forms.Panel]})[0]
-            foreach($text in @('Ver planes de energia','Ver efectos en Windows (comprobar)')){
+            foreach($text in @('Ver planes de energia','Configurar en Windows')){
                 $button=@($panel.Controls|ForEach-Object{$_.Controls}|Where-Object{$_.Text -eq $text})[0];Invoke-RegressionClick $button
             }
             $global:JunoRegressionMessages.Count|Should Be 2

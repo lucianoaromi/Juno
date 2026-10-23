@@ -28,7 +28,9 @@ Describe 'Accesos oficiales desde energía y transparencia sin cambios de Window
         $visual=$configForm.Controls.Find('VisualWindows',$true)[0]
         foreach($name in @('PowerWindows','TransparencyWindows')){
             $b=$configForm.Controls.Find($name,$true)[0];$b.Text|Should Be 'Configurar en Windows';$b.Secondary|Should Be $true;$b.Accent|Should Be $false
-            $b.GetType()|Should Be $visual.GetType();$b.Height|Should Be $visual.Height;$b.Font|Should Be $visual.Font
+            # El acceso visual usa ahora la sección compacta de Limpieza/Discos;
+            # energía y transparencia conservan sus dimensiones anteriores.
+            $b.GetType()|Should Be $visual.GetType();$b.Font|Should Be $visual.Font
         }
         @($configForm.Controls.Find('PowerDetails',$true)).Count|Should Be 0
         @($configForm.Controls.Find('TransparencyDetails',$true)).Count|Should Be 0
