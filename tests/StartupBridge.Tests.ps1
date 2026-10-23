@@ -248,21 +248,27 @@ Describe 'Inicio: puente real con Windows completamente ficticio' {
     }
     It 'recuperación general restaura el respaldo sin volver a administrar entradas desde Aplicaciones' {
         [void](Disable-StartupBridge)
+        # Extend only this private fixture to exercise the central bridge against the stable startup engine/store.
+        foreach($name in @('RecoveryOperations','UiSupport','PowerOperations','TransparencyOperations','VisualInterop','BackgroundInventory','PermisosUsuario','PermisosSegundoPlano','PowerAdapter','TransparencyAdapter','RecoveryAdapter')){
+            Copy-Item -LiteralPath (Join-Path $startupBridgeRoot ($name+'.ps1')) -Destination (Join-Path $sFixture.Root ($name+'.ps1'))
+        }
+        [IO.File]::AppendAllText((Join-Path $sFixture.Root 'RecoveryAdapter.ps1'),"`r`nfunction Get-BPUAccount {'TEST-SID'}`r`nfunction Get-TransparencySnapshot {throw 'TEST: native query forbidden'}`r`n",[Text.UTF8Encoding]::new($true))
+        $central=New-Object Juno.Preview.RecoveryController((New-Object Juno.Preview.PowerShellRecoveryService($sFixture.Root)))
         $controller=New-Object Juno.Preview.StartupController($sBridge);$confirm=New-Object Juno.Preview.Testing.ControlledConfirmation;$confirm.Accept=$true
         $d=New-Object Juno.Preview.DashboardController((New-Object Juno.Preview.UnavailableDashboardQuery));$t=New-Object Juno.Preview.TransparencyController((New-Object Juno.Preview.UnavailableTransparencyService));$p=New-Object Juno.Preview.PowerController((New-Object Juno.Preview.UnavailablePowerService));$v=New-Object Juno.Preview.VisualController((New-Object Juno.Preview.UnavailableVisualService));$settings=New-Object Juno.Preview.Testing.ControlledStartupSettings
-        $window=New-Object Juno.Preview.ShellForm($startupBridgeRoot,$d,$t,$confirm,$p,$null,$null,$v,$null,$controller,$settings)
+        $window=New-Object Juno.Preview.ShellForm($startupBridgeRoot,$d,$t,$confirm,$p,$null,$null,$v,$null,$controller,$settings,$null,$null,$null,$central)
         try{
             $window.Navigate('Aplicaciones');$window.Controls.Find('startup',$true)[0].Controls.Count|Should Be 3;$controller.HasRequested|Should Be $false
             $backup=[IO.File]::ReadAllText($sFixture.Backup);(Read-StartupBridgeFixture $sFixture).Writes|Should Be 1
-            $window.Navigate('Restauración');$button=$window.Controls.Find('StartupRecoveryRead',$true)[0]
+            $window.Navigate('Restauración');$button=$window.Controls.Find('RecoveryRead',$true)[0]
             [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-            $watch=[Diagnostics.Stopwatch]::StartNew();while($controller.IsBusy -and $watch.ElapsedMilliseconds -lt 20000){[void]$controller.Poll();[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
-            $controller.IsBusy|Should Be $false;$controller.Snapshot.CanRestore|Should Be $true
+            $watch=[Diagnostics.Stopwatch]::StartNew();while($central.IsBusy -and $watch.ElapsedMilliseconds -lt 20000){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
+            $central.IsBusy|Should Be $false;$central.Find('Startup').CanRestore|Should Be $true;$controller.HasRequested|Should Be $false
             [IO.File]::ReadAllText($sFixture.Backup)|Should Be $backup;(Read-StartupBridgeFixture $sFixture).Writes|Should Be 1
             $window.Navigate('Restauración');$button=$window.Controls.Find('StartupRestore',$true)[0]
             [void]$button.GetType().GetMethod('OnClick',[Reflection.BindingFlags]'Instance,NonPublic').Invoke($button,@([EventArgs]::Empty))
-            $watch.Restart();while($controller.IsBusy -and $watch.ElapsedMilliseconds -lt 20000){[void]$controller.Poll();[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
-            $controller.IsBusy|Should Be $false;$controller.Snapshot.Outcome|Should Be Restored;$confirm.Calls|Should Be 1
+            $watch.Restart();while(($central.IsBusy -or $controller.IsBusy) -and $watch.ElapsedMilliseconds -lt 20000){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 10}
+            $central.IsBusy|Should Be $false;$controller.IsBusy|Should Be $false;$central.Snapshot.Outcome|Should Be Restored;$confirm.Calls|Should Be 1
             @((Read-StartupBridgeFixture $sFixture).Values.PSObject.Properties).Count|Should Be 0
         }finally{$window.Dispose()}
     }

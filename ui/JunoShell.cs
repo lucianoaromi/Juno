@@ -349,6 +349,9 @@ namespace Juno.Preview
         private bool reviewingStartup;
         private bool requestingTool;
         public StartupController Startup {get{return startup;}}
+        private readonly RecoveryController recovery;
+        private readonly Timer recoveryTimer;
+        public RecoveryController Recovery {get{return recovery;}}
 
         public ShellForm(string assetRoot):this(assetRoot,new DashboardController(new UnavailableDashboardQuery())){}
         public ShellForm(string assetRoot,DashboardController controller):this(assetRoot,controller,new TransparencyController(new UnavailableTransparencyService()),null){}
@@ -369,7 +372,21 @@ namespace Juno.Preview
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings,IColorsSettingsLauncher colors,ICleanupSettingsLauncher cleanup)
             :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,settings,launchItems,launchSettings,colors,cleanup,null){}
         public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings,IColorsSettingsLauncher colors,ICleanupSettingsLauncher cleanup,IDiskSettingsLauncher disks)
+            :this(assetRoot,controller,integration,confirmation,energy,plans,selection,effects,settings,launchItems,launchSettings,colors,cleanup,disks,new RecoveryController(new UnavailableRecoveryService())){}
+        public ShellForm(string assetRoot,DashboardController controller,TransparencyController integration,ITransparencyConfirmation confirmation,PowerController energy,IPowerPlansLauncher plans,IPowerPlanSelection selection,VisualController effects,IVisualSettingsLauncher settings,StartupController launchItems,IStartupSettingsLauncher launchSettings,IColorsSettingsLauncher colors,ICleanupSettingsLauncher cleanup,IDiskSettingsLauncher disks,RecoveryController restoration)
         {
+            if(restoration==null)throw new ArgumentNullException("restoration");recovery=restoration;
+            recoveryTimer=new Timer();recoveryTimer.Interval=100;
+            recoveryTimer.Tick+=delegate{
+                if(recovery.Poll()){
+                    string attempted=recovery.Snapshot.Attempted;
+                    if(attempted=="Power"&&power.Start(PowerAction.Read,null))powerTimer.Start();
+                    if(attempted=="Transparency"&&transparency.Start(TransparencyAction.Read,null))transparencyTimer.Start();
+                    if(attempted=="Startup"&&startup.Start(StartupAction.Read,null,null))startupTimer.Start();
+                    RefreshTransparencyView();
+                }
+                if(!recovery.IsBusy)recoveryTimer.Stop();
+            };
             if(controller==null)throw new ArgumentNullException("controller");dashboard=controller;
             if(integration==null)throw new ArgumentNullException("integration");transparency=integration;
             transparencyConfirmation=confirmation??new TransparencyConfirmation(this);
@@ -500,7 +517,7 @@ namespace Juno.Preview
             SelectedSection=section;breadcrumb.Text="ESPACIO DE TRABAJO  /  "+section;
             foreach(KeyValuePair<string,PreviewButton> pair in navigation){pair.Value.Selected=pair.Key==section;pair.Value.AccessibleDescription=pair.Value.Selected?"Sección seleccionada":"Ir a "+pair.Key;pair.Value.Invalidate();}
             status.Text=ToolsStatus;
-            header.Controls["InformationBadge"].Text=section=="Inicio"?"●  LECTURA DEL SISTEMA":section=="Rendimiento"?"●  AJUSTES DE RENDIMIENTO":section=="Aplicaciones"?"●  PROGRAMAS DE INICIO":section=="Mantenimiento"?"●  MANTENIMIENTO EN WINDOWS":"●  HERRAMIENTAS SIN CONECTAR";
+            header.Controls["InformationBadge"].Text=section=="Inicio"?"●  LECTURA DEL SISTEMA":section=="Rendimiento"?"●  AJUSTES DE RENDIMIENTO":section=="Aplicaciones"?"●  PROGRAMAS DE INICIO":section=="Mantenimiento"?"●  MANTENIMIENTO EN WINDOWS":section=="Restauración"?"●  RECUPERACIÓN DE AJUSTES":"●  HERRAMIENTAS SIN CONECTAR";
             switch(section){
                 case "Inicio":BuildHome();break;
                 case "Rendimiento":BuildPerformance();break;
@@ -568,7 +585,7 @@ namespace Juno.Preview
             try{cleanupSettings.Open();status.Text=ToolsStatus;}
             catch(Exception){status.Text="No se pudo abrir la limpieza de Windows.";}
         }
-        private bool StartupBlocked {get{return requestingTool||startup.IsBusy||transparency.IsBusy||power.IsBusy||visual.IsBusy||reviewingStartup||reviewingTransparency||reviewingPower||reviewingVisual;}}
+        private bool StartupBlocked {get{return requestingTool||recovery.IsBusy||startup.IsBusy||transparency.IsBusy||power.IsBusy||visual.IsBusy||reviewingStartup||reviewingTransparency||reviewingPower||reviewingVisual;}}
         private void BuildStartup()
         {
             page.Controls.Add(new StartupSettingsSection(scale,normal,bold,!StartupBlocked,OpenStartupWindows));
@@ -598,16 +615,14 @@ namespace Juno.Preview
         }
         private void BuildRecovery()
         {
-            page.Controls.Add(Intro("RESTAURACIÓN","Volver, con claridad.","La restauración general aún no está integrada. Recuperá inicio aquí y los ajustes de rendimiento desde su tarjeta."));
-            TileGrid grid=Grid(2);
-            grid.Controls.Add(Tool("Restauración","Ajustes generales","Restaurá energía, transparencia o efectos visuales desde su tarjeta en Rendimiento."));
-            Tile recovery=new Tile("startup-recovery","Programas de inicio","Recuperá los cambios de inicio guardados por JUNO.",normal,bold,metric,null,false,scale);
-            recovery.AddContent(Tile.MakeLabel(startup.HasRequested?startup.Status:"Comprobá si hay cambios anteriores para restaurar.",small,Colors.Muted));
-            var read=ToolButton("StartupRecoveryRead","Comprobar respaldos",false,startup.IsConfigured&&!StartupBlocked);read.Click+=delegate{RequestStartup(StartupAction.Read,null);};recovery.AddContent(read);
-            if(startup.Snapshot.CanRestore){var restore=ToolButton("StartupRestore","Restaurar cambios",false,!StartupBlocked);restore.Click+=delegate{RequestStartup(StartupAction.Restore,null);};recovery.AddContent(restore);}
-            grid.Controls.Add(recovery);
-            grid.Controls.Add(Tool("Restauración","Configuración TRIM","La restauración de TRIM seguirá separada del mantenimiento de discos."));
-            grid.Controls.Add(new Tile("Acerca de","Respaldos existentes","Esta sección no ofrece recuperación general. La tarjeta Transparencia consulta y conserva sus originales mediante el almacén estable.",normal,bold,metric,null,false,scale));page.Controls.Add(grid);
+            page.Controls.Add(new RecoverySection(recovery,scale,normal,bold,!StartupBlocked,()=>RequestRecovery(null),id=>RequestRecovery(id)));
+        }
+        public bool RequestRecovery(string id)
+        {
+            if(StartupBlocked)return false;
+            bool started;requestingTool=true;
+            try{started=recovery.Start(id,transparencyConfirmation);}finally{requestingTool=false;}
+            RefreshTransparencyView();if(started)recoveryTimer.Start();return started;
         }
         private void BuildAbout()
         {
@@ -645,7 +660,7 @@ namespace Juno.Preview
 
         public bool RequestTransparency(TransparencyAction action)
         {
-            if(requestingTool||startup.IsBusy||reviewingStartup)return false;
+            if(requestingTool||recovery.IsBusy||startup.IsBusy||reviewingStartup)return false;
             if(power.IsBusy||reviewingPower||visual.IsBusy||reviewingVisual)return false;
             bool started;requestingTool=true;try{started=transparency.Start(action,transparencyConfirmation);}finally{requestingTool=false;}
             RefreshTransparencyView();
@@ -670,7 +685,7 @@ namespace Juno.Preview
             PreviewButton windows=ToolButton("TransparencyWindows","Configurar en Windows",false,!StartupBlocked);windows.Click+=delegate{OpenTransparencyWindows();};row.Controls.Add(windows);tile.AddContent(row);grid.Controls.Add(tile);
         }
         private PreviewButton ToolButton(string name,string text,bool accent,bool enabled)
-        {return new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(44*scale),Enabled=enabled&&!startup.IsBusy&&!reviewingStartup};}
+        {return new PreviewButton{Name=name,Text=text,Font=normal,Accent=accent,Secondary=!accent,Height=(int)(44*scale),Enabled=enabled&&!recovery.IsBusy&&!startup.IsBusy&&!reviewingStartup};}
         private void RefreshTransparencyView()
         {
             if(IsDisposed||Disposing)return;
@@ -693,10 +708,10 @@ namespace Juno.Preview
             if(SelectedSection=="Rendimiento"&&Visible&&power.IsConfigured&&!power.HasRequested&&!transparency.IsBusy)RequestPower(PowerAction.Read);
             if(SelectedSection=="Rendimiento"&&Visible&&visual.IsConfigured&&!visual.HasRequested&&!transparency.IsBusy&&!power.IsBusy)RequestVisual(VisualAction.Read);
         }
-        private string ToolsStatus {get{return startup.IsBusy?"Programas de inicio · "+startup.Status:visual.IsBusy?"Efectos visuales · "+visual.Status:power.IsBusy?"Energía · "+power.Status:transparency.IsBusy?"Transparencia · "+transparency.Status:"Dashboard de solo lectura · Energía, efectos visuales, transparencia e inicio integrados";}}
+        private string ToolsStatus {get{return recovery.IsBusy?"Restauración · "+recovery.Status:startup.IsBusy?"Programas de inicio · "+startup.Status:visual.IsBusy?"Efectos visuales · "+visual.Status:power.IsBusy?"Energía · "+power.Status:transparency.IsBusy?"Transparencia · "+transparency.Status:"Dashboard de solo lectura · Energía, efectos visuales, transparencia e inicio integrados";}}
         public bool RequestPower(PowerAction action)
         {
-            if(requestingTool||startup.IsBusy||reviewingStartup)return false;
+            if(requestingTool||recovery.IsBusy||startup.IsBusy||reviewingStartup)return false;
             if(transparency.IsBusy||reviewingTransparency||visual.IsBusy||reviewingVisual)return false;
             bool started;requestingTool=true;try{started=power.Start(action,transparencyConfirmation,powerSelection);}finally{requestingTool=false;}
             RefreshTransparencyView();
@@ -753,7 +768,7 @@ namespace Juno.Preview
         }
         public bool RequestVisual(VisualAction action)
         {
-            if(requestingTool||startup.IsBusy||reviewingStartup)return false;
+            if(requestingTool||recovery.IsBusy||startup.IsBusy||reviewingStartup)return false;
             if(power.IsBusy||transparency.IsBusy||reviewingPower||reviewingTransparency)return false;
             visualWindowsFailure=null;
             bool started;requestingTool=true;try{started=visual.Start(action,transparencyConfirmation);}finally{requestingTool=false;}RefreshTransparencyView();if(started)visualTimer.Start();return started;
@@ -816,6 +831,7 @@ namespace Juno.Preview
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if(recovery.IsWriting){e.Cancel=true;status.Text="Restauración en curso. Esperá la verificación antes de cerrar.";}
             if(startup.IsWriting){startup.Poll();if(startup.IsWriting){e.Cancel=true;status.Text="Inicio en curso. Esperá la verificación antes de cerrar.";}}
             if(visual.IsWriting){visual.Poll();if(visual.IsWriting){e.Cancel=true;RefreshTransparencyView();}}
             if(power.IsWriting){power.Poll();if(power.IsWriting){e.Cancel=true;RefreshTransparencyView();}}
@@ -872,6 +888,7 @@ namespace Juno.Preview
         }
         protected override void Dispose(bool disposing)
         {
+            if(disposing&&!ResourcesReleased){recoveryTimer.Stop();recoveryTimer.Dispose();recovery.Dispose();}
             if(disposing&&!ResourcesReleased){startupTimer.Stop();startupTimer.Dispose();startup.Dispose();}
             if(disposing&&!ResourcesReleased){visualTimer.Stop();visualTimer.Dispose();visual.Dispose();powerTimer.Stop();powerTimer.Dispose();power.Dispose();transparencyTimer.Stop();transparencyTimer.Dispose();transparency.Dispose();dashboardTimer.Stop();dashboardTimer.Dispose();dashboard.Dispose();base.Dispose(true);foreach(IDisposable asset in assets)asset.Dispose();foreach(Font font in fonts)font.Dispose();ResourcesReleased=true;return;}
             base.Dispose(disposing);

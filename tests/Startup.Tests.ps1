@@ -59,17 +59,17 @@ Describe 'Inicio: acceso mínimo a Windows y recuperación conservada' {
     It 'no ofrece operaciones individuales ni permite iniciarlas desde el shell' {
         $sWindow.RequestStartup('Enable','ID')|Should Be $false;$sWindow.RequestStartup('Disable','ID')|Should Be $false;$sFake.WriteCalls|Should Be 0
     }
-    It 'la recuperación se consulta solo desde Restauración' {
-        $sWindow.Navigate('Restauración');$sFake.Calls|Should Be 0;Click-StartupUi StartupRecoveryRead
+    It 'conserva el contrato del controlador histórico sin consultar al navegar' {
+        $sWindow.Navigate('Restauración');$sFake.Calls|Should Be 0;$sWindow.RequestStartup('Read',$null)|Should Be $true
         $sFake.LastAction|Should Be Read;$sFake.WriteCalls|Should Be 0
         $r=New-Object Juno.Preview.StartupResult;$r.CanRestore=$true;$r.Message='Hay cambios anteriores.';$sFake.Complete($r);[void]$sController.Poll();$sFake.Next();$sWindow.Navigate('Restauración')
-        $sConfirm.Accept=$true;Click-StartupUi StartupRestore;$sFake.LastAction|Should Be Restore;$sFake.LastConfirmed|Should Be $true;$sConfirm.Calls|Should Be 1
+        $sConfirm.Accept=$true;$sWindow.RequestStartup('Restore',$null)|Should Be $true;$sFake.LastAction|Should Be Restore;$sFake.LastConfirmed|Should Be $true;$sConfirm.Calls|Should Be 1
     }
     It 'cancelar recuperación conserva el estado y no escribe' {
-        $sController.Snapshot.CanRestore=$true;$sWindow.Navigate('Restauración');$sConfirm.Accept=$false;Click-StartupUi StartupRestore;$sFake.WriteCalls|Should Be 0;$sConfirm.Calls|Should Be 1
+        $sController.Snapshot.CanRestore=$true;$sWindow.Navigate('Restauración');$sConfirm.Accept=$false;$sWindow.RequestStartup('Restore',$null)|Should Be $false;$sFake.WriteCalls|Should Be 0;$sConfirm.Calls|Should Be 1
     }
     It 'respaldo incompatible impide restaurar' {
-        $sController.Snapshot.CanRestore=$true;$sController.Snapshot.BackupIssue='UserMismatch';$sWindow.Navigate('Restauración');Click-StartupUi StartupRestore;$sFake.WriteCalls|Should Be 0
+        $sController.Snapshot.CanRestore=$true;$sController.Snapshot.BackupIssue='UserMismatch';$sWindow.Navigate('Restauración');$sWindow.RequestStartup('Restore',$null)|Should Be $false;$sFake.WriteCalls|Should Be 0
     }
     It 'la sección es compacta y sin superposición a <Width>x<Height>' -TestCases @(@{Width=1180;Height=790},@{Width=940;Height=650},@{Width=700;Height=500}) {
         param($Width,$Height)$sWindow.ClientSize=New-Object Drawing.Size($Width,$Height);$sWindow.PerformLayout()

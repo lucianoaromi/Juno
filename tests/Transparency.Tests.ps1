@@ -5,7 +5,7 @@ $ErrorActionPreference='Stop'
 $transRoot=Split-Path $PSScriptRoot -Parent
 if(-not ('Juno.Preview.Testing.ControlledTransparency' -as [type])){
     if('Juno.Preview.ShellForm' -as [type]){throw 'Ejecuta la suite en un proceso nuevo.'}
-    $files=@('ui\DashboardModel.cs','ui\WindowsSystemSource.cs','ui\DashboardWorker.cs','ui\TransparencyModel.cs','ui\PowerShellTransparencyService.cs','ui\TransparencyConfirmation.cs','ui\PowerModel.cs','ui\PowerPlatform.cs','ui\PowerShellPowerService.cs','ui\VisualModel.cs','ui\PowerShellVisualService.cs','ui\StartupModel.cs','ui\StartupControls.cs','ui\PowerShellStartupService.cs','ui\JunoShell.cs','tests\Dashboard.TestSupport.cs','tests\Transparency.TestSupport.cs','tests\Power.TestSupport.cs','tests\Visual.TestSupport.cs','tests\Startup.TestSupport.cs')|ForEach-Object{Join-Path $transRoot $_}
+    $files=@('ui\DashboardModel.cs','ui\WindowsSystemSource.cs','ui\DashboardWorker.cs','ui\TransparencyModel.cs','ui\PowerShellTransparencyService.cs','ui\TransparencyConfirmation.cs','ui\PowerModel.cs','ui\PowerPlatform.cs','ui\PowerShellPowerService.cs','ui\VisualModel.cs','ui\PowerShellVisualService.cs','ui\StartupModel.cs','ui\StartupControls.cs','ui\PowerShellStartupService.cs','ui\RecoveryModel.cs','ui\RecoveryControls.cs','ui\PowerShellRecoveryService.cs','ui\JunoShell.cs','tests\Dashboard.TestSupport.cs','tests\Transparency.TestSupport.cs','tests\Power.TestSupport.cs','tests\Visual.TestSupport.cs','tests\Startup.TestSupport.cs')|ForEach-Object{Join-Path $transRoot $_}
     Add-Type -Path $files -ReferencedAssemblies @('System.Windows.Forms','System.Drawing','System.Management','System.Web.Extensions',[Management.Automation.PSObject].Assembly.Location)
 }
 . (Join-Path $transRoot 'BackupStore.ps1')
@@ -314,10 +314,11 @@ Describe 'Tarjeta Transparencia y navegación sin operaciones reales' {
         (Test-TransButtonFlag $transForm 'TransparencyDisable' Secondary)|Should Be $false
         (Test-TransButtonFlag $transForm 'TransparencyRestore' Enabled)|Should Be $true
     }
-    It 'Restauración general sigue inactiva e indica dónde restaurar Transparencia' {
+    It 'Restauración central no copia acciones de Transparencia sin consultar sus respaldos' {
         $transForm.Navigate('Restauración')
-        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'general aún no está integrada'
-        foreach($button in @(Get-TransControls $transForm|Where-Object{$_.Name -eq 'ToolAction'})){$button.Enabled|Should Be $false}
+        ((Get-TransControls $transForm).Text -join ' ')|Should Match 'Comprobá si hay cambios anteriores'
+        @($transForm.Controls.Find('TransparencyRecoveryRestore',$true)).Count|Should Be 0
+        $transForm.Recovery.HasRequested|Should Be $false
     }
     It 'el bucle modal de una revisión no abre confirmaciones repetidas' {
         $provider=New-Object Juno.Preview.Testing.ControlledTransparency
