@@ -549,10 +549,7 @@ namespace Juno.Preview
         }
         private void BuildApps()
         {
-            TileGrid grid=Grid(2);
             BuildStartup();
-            grid.Controls.Add(Tool("Aplicaciones","Permisos de segundo plano","Mostrar capacidades y evidencia según edición de Windows y tipo de aplicación."));
-            grid.Controls.Add(Tool("cpu","Procesos activos","Explorar una instantánea de procesos. Cerrar un proceso no cambia sus permisos."));page.Controls.Add(grid);
         }
         private void BuildMaintenance()
         {

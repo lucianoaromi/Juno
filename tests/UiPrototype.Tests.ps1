@@ -77,13 +77,40 @@ Describe 'JUNO v0.9: shell visual independiente' {
     }
 
     It 'mantiene las herramientas no integradas inactivas' {
-        $counts=@{'Rendimiento'=0;'Aplicaciones'=2;'Mantenimiento'=0;'Restauración'=2}
+        $counts=@{'Rendimiento'=0;'Aplicaciones'=0;'Mantenimiento'=0;'Restauración'=2}
         foreach($section in $counts.Keys){
             $preview.Navigate($section)
             $actions=@(Get-PreviewControls $preview|Where-Object{$_.Name -eq 'ToolAction'})
             $actions.Count|Should Be $counts[$section]
             foreach($action in $actions){$action.Enabled|Should Be $false;$action.Text|Should Be 'Sin conectar'}
         }
+    }
+
+    It 'Aplicaciones conserva solo Inicio sin gestión de procesos ni reemplazos decorativos' {
+        $preview.Navigate('Aplicaciones')
+        $page=$preview.Controls.Find('Page',$true)[0]
+        $page.Controls.Count|Should Be 1
+        $page.Controls[0].Name|Should Be 'startup'
+        $page.Controls[0].Controls.Count|Should Be 3
+        $controls=@(Get-PreviewControls $page)
+        @($controls|Where-Object{$_ -is [Windows.Forms.DataGridView] -or $_ -is [Windows.Forms.ListView]}).Count|Should Be 0
+        ($controls.Text -join ' ')|Should Not Match 'Procesos en ejecución|Procesos activos|Solicitar cierre|Memoria|aplicaciones compatibles|Permisos de segundo plano|Administrador de tareas'
+        1..3|ForEach-Object{$preview.Navigate('Inicio');$preview.Navigate('Aplicaciones')}
+        $preview.Controls.Find('Page',$true)[0].Controls.Count|Should Be 1
+        $preview.Startup.HasRequested|Should Be $false
+    }
+
+    It 'retira los componentes exclusivos de procesos y su conexión al bootstrap' {
+        foreach($name in @('ProcessController','ProcessApplication','ApplicationProcessService','WindowsProcessProvider','ProcessesSection')){
+            [Juno.Preview.ShellForm].Assembly.GetType(('Juno.Preview.'+$name))|Should BeNullOrEmpty
+        }
+        [Juno.Preview.ShellForm].GetMethod('RequestProcess')|Should BeNullOrEmpty
+        foreach($file in @('ui/ProcessModel.cs','ui/WindowsProcessProvider.cs','ui/ProcessControls.cs','tests/Process.TestSupport.cs','tests/Process.Tests.ps1','tests/ProcessUi.Tests.ps1')){
+            Test-Path -LiteralPath (Join-Path $previewRoot $file)|Should Be $false
+        }
+        $bootstrap=[IO.File]::ReadAllText((Join-Path $previewRoot 'Juno-Prototipo.ps1'))
+        $bootstrap|Should Not Match 'ProcessController|WindowsProcessProvider|ProcessModel.cs|ProcessControls.cs'
+        Test-Path -LiteralPath (Join-Path $previewRoot 'SegundoPlano.ps1')|Should Be $true
     }
 
     It 'distribuye todas las secciones en <Width>x<Height> sin solapamientos ni texto recortado' -TestCases @(
